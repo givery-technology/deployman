@@ -14,7 +14,6 @@ import (
 )
 
 var Version = "unset"
-var UpdatedAt = "unset"
 
 var (
 	app     = kingpin.New("deployman", "A CLI for controlling ALB and two AutoScalingGroups and performing Blue/Green Deployment.")
@@ -81,7 +80,7 @@ func main() {
 
 	switch command {
 	case version.FullCommand():
-		fmt.Println("deployman", Version, UpdatedAt)
+		fmt.Println("deployman", Version)
 		os.Exit(0)
 
 	case bundleRegister.FullCommand():

@@ -1,7 +1,7 @@
-# deployman
+# Deployman
 A CLI for controlling ALB and two AutoScalingGroups and performing Blue/Green Deployment.
 
-# install
+# Install
 There are the following methods.
 
 ### 1. Download binary
@@ -10,12 +10,10 @@ TODO
 ### 2. Compile from source
 You should have the latest go installed (>= 1.19).
 ```bash
-make
-# Please check the Makefile and choose the need platform.
-ll .bin/*/*
+cd ./cmd/deployman && go build
 ```
 
-# requirements
+# Requirements
 - Requires `AWS_ACCESS_KEY/AWS_SECRET_ACCESS_KEY` or `AWS_PROFILE` environment variables.
 - You will need `config.json` in the same location as the deploynam The contents are as follows.
 

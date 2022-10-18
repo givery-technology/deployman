@@ -1,0 +1,22 @@
+project_name: deployman
+before:
+  hooks:
+    - go mod tidy
+builds:
+  - main: ./cmd/deployman
+    binary: deployman
+    ldflags:
+      - -s -w -X main.Version={{.Version}}
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=0
+archives:
+  - format: zip
+release:
+  prerelease: auto
