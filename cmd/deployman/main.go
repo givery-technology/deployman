@@ -29,6 +29,7 @@ var (
 	bundleRegisterActivate = bundleRegister.Flag("with-activate", "Activate registered bundles.").Bool()
 	bundleList             = bundle.Command("list", "List registered application bundles.")
 	bundleActivate         = bundle.Command("activate", "Activate one of the registered bundles. The activated bundle will be used for the next deployment or scale-out.")
+	bundleActivateTarget   = bundleActivate.Flag("target", "Target type for bundle. Valid values are either 'blue' or 'green'").Enum("blue", "green")
 	bundleActivateName     = bundleActivate.Flag("name", "Name of bundle to activate").Required().String()
 	bundleDownload         = bundle.Command("download", "Download application bundle file.")
 	bundleDownloadTarget   = bundleDownload.Flag("target", "Target type for bundle. Valid values are either 'blue' or 'green'").Enum("blue", "green")
@@ -103,11 +104,19 @@ func main() {
 		err = bundler.ListBundles(ctx)
 
 	case bundleActivate.FullCommand():
-		info, err := deployer.GetDeployInfo(ctx)
-		if err != nil {
-			logger.Fatal("🚨 Command Failure", err)
+		var targetType internal.TargetType
+		if *bundleActivateTarget == "blue" {
+			targetType = internal.BlueTargetType
+		} else if *bundleActivateTarget == "green" {
+			targetType = internal.GreenTargetType
+		} else {
+			info, err := deployer.GetDeployInfo(ctx)
+			if err != nil {
+				logger.Fatal("🚨 Command Failure", err)
+			}
+			targetType = info.IdlingTarget.Type
 		}
-		err = bundler.Activate(ctx, info.IdlingTarget.Type, bundleActivateName)
+		err = bundler.Activate(ctx, targetType, bundleActivateName)
 
 	case bundleDownload.FullCommand():
 		var targetType internal.TargetType

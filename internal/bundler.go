@@ -90,13 +90,17 @@ func (b *Bundler) ListBundles(ctx context.Context) error {
 
 	var data [][]string
 	for i, bundleObject := range *bundleObjects {
-		status := ""
+		var targets []string
 		if blueBundle != nil && strings.Contains(*bundleObject.Key, *blueBundle.Value) {
-			status = "activated:blue"
-		} else if greenBundle != nil && strings.Contains(*bundleObject.Key, *greenBundle.Value) {
-			status = "activated:green"
+			targets = append(targets, "blue")
 		}
-
+		if greenBundle != nil && strings.Contains(*bundleObject.Key, *greenBundle.Value) {
+			targets = append(targets, "green")
+		}
+		status := ""
+		if len(targets) > 0 {
+			status = "activated:[" + strings.Join(targets, ", ") + "]"
+		}
 		location := b.config.TimeZone.GetLocation()
 		data = append(data, []string{
 			strconv.Itoa(i + 1),
