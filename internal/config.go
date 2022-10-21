@@ -5,6 +5,7 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/pkg/errors"
 	"os"
+	"time"
 )
 
 type Config struct {
@@ -12,6 +13,7 @@ type Config struct {
 	ListenerRuleArn string      `json:"listenerRuleArn" validate:"required"`
 	Target          TargetSet   `json:"target" validate:"required"`
 	RetryPolicy     RetryPolicy `json:"retryPolicy" validate:"required"`
+	TimeZone        TimeZone    `json:"timeZone" validate:"required"`
 }
 
 type TargetSet struct {
@@ -29,11 +31,30 @@ type RetryPolicy struct {
 	IntervalSeconds int `json:"intervalSeconds"`
 }
 
+type TimeZone struct {
+	Location string `json:"location"`
+	Offset   int    `json:"offset"`
+}
+
+var location *time.Location
+
+func (t *TimeZone) GetLocation() *time.Location {
+	if location != nil {
+		return location
+	}
+	location = time.FixedZone(t.Location, t.Offset)
+	return location
+}
+
 func NewConfig(filename *string) (*Config, error) {
 	config := &Config{
 		RetryPolicy: RetryPolicy{
 			MaxLimit:        30,
 			IntervalSeconds: 10,
+		},
+		TimeZone: TimeZone{
+			Location: "Asia/Tokyo",
+			Offset:   9 * 60 * 60,
 		},
 	}
 

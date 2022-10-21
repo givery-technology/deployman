@@ -17,10 +17,6 @@ import (
 	"time"
 )
 
-var (
-	JST = time.FixedZone("Asia/Tokyo", 9*60*60)
-)
-
 const (
 	BundlePrefix             string = "bundles/"
 	ActivatedBundleKeyPrefix string = "activated_bundle_"
@@ -90,9 +86,10 @@ func (b *Bundler) ListBundles(ctx context.Context) error {
 			status = "activated:green"
 		}
 
+		location := b.config.TimeZone.GetLocation()
 		data = append(data, []string{
 			strconv.Itoa(i + 1),
-			bundleObject.LastModified.In(JST).Format(time.RFC3339),
+			bundleObject.LastModified.In(location).Format(time.RFC3339),
 			strings.Replace(*bundleObject.Key, BundlePrefix, "", 1),
 			status,
 		})
