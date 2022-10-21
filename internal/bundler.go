@@ -62,13 +62,24 @@ func (b *Bundler) listBundles(ctx context.Context, bucket *string) (*[]s3Types.O
 }
 
 func (b *Bundler) ListBundles(ctx context.Context) error {
+	hasError := func(err error) bool {
+		if err == nil {
+			return false
+		}
+		var apiErr smithy.APIError
+		if errors.As(err, &apiErr) && apiErr.ErrorCode() == "NoSuchKey" {
+			return false
+		}
+		return true
+	}
+
 	blueBundle, err := b.getActivatedBundle(ctx, BlueTargetType)
-	if err != nil {
+	if hasError(err) {
 		return err
 	}
 
 	greenBundle, err := b.getActivatedBundle(ctx, GreenTargetType)
-	if err != nil {
+	if hasError(err) {
 		return err
 	}
 
@@ -80,9 +91,9 @@ func (b *Bundler) ListBundles(ctx context.Context) error {
 	var data [][]string
 	for i, bundleObject := range *bundleObjects {
 		status := ""
-		if strings.Contains(*bundleObject.Key, *blueBundle.Value) {
+		if blueBundle != nil && strings.Contains(*bundleObject.Key, *blueBundle.Value) {
 			status = "activated:blue"
-		} else if strings.Contains(*bundleObject.Key, *greenBundle.Value) {
+		} else if greenBundle != nil && strings.Contains(*bundleObject.Key, *greenBundle.Value) {
 			status = "activated:green"
 		}
 

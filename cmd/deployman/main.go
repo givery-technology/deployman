@@ -96,7 +96,7 @@ func main() {
 			if err != nil {
 				break
 			}
-			err = bundler.Activate(ctx, info.IdlingTarget.Type, aws.String(internal.BundlePrefix+*bundleRegisterName))
+			err = bundler.Activate(ctx, info.IdlingTarget.Type, bundleRegisterName)
 		}
 
 	case bundleList.FullCommand():
