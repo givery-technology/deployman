@@ -1,6 +1,10 @@
 package internal
 
-import "os"
+import (
+	"bufio"
+	"fmt"
+	"os"
+)
 
 func Contains[T comparable](items *[]T, value *T) bool {
 	for _, item := range *items {
@@ -58,4 +62,19 @@ func GetEnv(key *string, fallback *string) string {
 		return value
 	}
 	return *fallback
+}
+
+func AskToContinue() bool {
+	scanner := bufio.NewScanner(os.Stdin)
+	for {
+		fmt.Println("continue? (Y/n) >")
+		scanner.Scan()
+		input := scanner.Text()
+		switch input {
+		case "y", "Y":
+			return true
+		default:
+			return false
+		}
+	}
 }

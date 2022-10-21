@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/alecthomas/kingpin"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -17,33 +18,36 @@ var Version = "unset"
 
 var (
 	app     = kingpin.New("deployman", "A CLI for controlling ALB and two AutoScalingGroups and performing Blue/Green Deployment.")
-	config  = app.Flag("config", "Configuration filepath. By default, './config.json'").Default("./config.json").String()
-	verbose = app.Flag("verbose", "A detailed log containing call stacks will be output").Default("false").Bool()
+	config  = app.Flag("config", "Configuration filepath. By default, './deployman.json'").Default("./deployman.json").String()
+	verbose = app.Flag("verbose", "A detailed log containing call stacks will be output.").Default("false").Bool()
 	version = app.Command("version", "Show current CLI version.")
 
-	bundle                        = app.Command("bundle", "Manage applicaiton bundle.")
-	bundleRegister                = bundle.Command("register", "Register new application bundle.")
-	bundleRegisterFile            = bundleRegister.Flag("file", "Bundle file path").Required().String()
-	bundleRegisterName            = bundleRegister.Flag("name", "Bundle file name").Required().String()
-	bundleList                    = bundle.Command("list", "List registered application bundles.")
-	bundleUpdateDeployTarget      = bundle.Command("update-deploy-target", "Update current deployable application bundle.")
-	bundleUpdateDeployTargetValue = bundleUpdateDeployTarget.Flag("value", "Value of deployable application bundle").Required().String()
-	bundleDownload                = bundle.Command("download", "Download application bunle file.")
-	bundleDownloadFile            = bundleDownload.Flag("file", "bundle file name and path.").Default("").String()
+	bundle                 = app.Command("bundle", "Manage applicaiton bundles in S3 bucket.")
+	bundleRegister         = bundle.Command("register", "Register new application bundle. By default, register bundles associated with idle AutoScalingGroups.")
+	bundleRegisterFilepath = bundleRegister.Flag("file", "File path").Required().String()
+	bundleRegisterName     = bundleRegister.Flag("name", "Name of bundle to be registered").Required().String()
+	bundleRegisterActivate = bundleRegister.Flag("with-activate", "Activate registered bundles.").Bool()
+	bundleList             = bundle.Command("list", "List registered application bundles.")
+	bundleActivate         = bundle.Command("activate", "Activate one of the registered bundles. The activated bundle will be used for the next deployment or scale-out.")
+	bundleActivateName     = bundleActivate.Flag("name", "Name of bundle to activate").Required().String()
+	bundleDownload         = bundle.Command("download", "Download application bundle file.")
+	bundleDownloadTarget   = bundleDownload.Flag("target", "Target type for bundle. Valid values are either 'blue' or 'green'").Enum("blue", "green")
 
-	ec2              = app.Command("ec2", "Manage application deployment for EC2.")
-	ec2status        = ec2.Command("status", "Show current deployment status.")
-	ec2deploy        = ec2.Command("deploy", "Deploy a new application to an idling AutoScalingGroup.")
-	ec2deployCleanup = ec2deploy.Flag("cleanup", "Cleanup idling AutoScalingGroup's instances.").Default("true").Bool()
-	ec2rollback      = ec2.Command("rollback", "Restore the AutoScalingGroup to their original state, then swap traffic.")
+	ec2                  = app.Command("ec2", "Manage B/G deployment for EC2.")
+	ec2status            = ec2.Command("status", "Show current deployment status.")
+	ec2deploy            = ec2.Command("deploy", "Deploy a new application to an idling AutoScalingGroup.")
+	ec2deployNoConfirm   = ec2deploy.Flag("y", "Skip confirmation before process.").Default("false").Bool()
+	ec2deployCleanup     = ec2deploy.Flag("cleanup", "Cleanup idling AutoScalingGroup's instances. Cleanup is done slowly by scale-in action.").Default("true").Bool()
+	ec2rollback          = ec2.Command("rollback", "Restore the AutoScalingGroup to their original state, then swap traffic.")
+	ec2rollbackNoConfirm = ec2rollback.Flag("y", "Skip confirmation before process.").Default("false").Bool()
 
-	ec2cleanup    = ec2.Command("cleanup", "Cleanup idling AutoScalingGroup's instances.")
-	ec2swap       = ec2.Command("swap", "Swap traffic from a running AutoScalingGroup to an idling AutoScalingGroup.")
-	ec2asg        = ec2.Command("asg", "Update AutoScalingGroup.")
-	ec2asgName    = ec2asg.Flag("name", "The name of AutoScalingGroup").Required().String()
-	ec2asgDesired = ec2asg.Flag("desired", "DesiredCapacity").Int32()
-	ec2asgMinSize = ec2asg.Flag("min", "MinSize").Int32()
-	ec2asgMaxSize = ec2asg.Flag("max", "MaxSize").Int32()
+	ec2cleanup          = ec2.Command("cleanup", "Cleanup idling AutoScalingGroup's instances.")
+	ec2swap             = ec2.Command("swap", "Swap traffic from a running AutoScalingGroup to an idling AutoScalingGroup.")
+	ec2updateASG        = ec2.Command("update-autoscaling", "Update capacity of AutoScalingGroup.")
+	ec2updateASGName    = ec2updateASG.Flag("name", "Name of AutoScalingGroup").Required().String()
+	ec2updateASGDesired = ec2updateASG.Flag("desired", "DesiredCapacity").Int32()
+	ec2updateASGMinSize = ec2updateASG.Flag("min", "MinSize").Int32()
+	ec2updateASGMaxSize = ec2updateASG.Flag("max", "MaxSize").Int32()
 )
 
 func main() {
@@ -84,30 +88,56 @@ func main() {
 		os.Exit(0)
 
 	case bundleRegister.FullCommand():
-		err = bundler.RegisterBundle(ctx, bundleRegisterFile, bundleRegisterName)
+		if err = bundler.Register(ctx, bundleRegisterFilepath, bundleRegisterName); err != nil {
+			break
+		}
+		if *bundleRegisterActivate {
+			info, err := deployer.GetDeployInfo(ctx)
+			if err != nil {
+				break
+			}
+			err = bundler.Activate(ctx, info.IdlingTarget.Type, aws.String(internal.BundlePrefix+*bundleRegisterName))
+		}
 
 	case bundleList.FullCommand():
 		err = bundler.ListBundles(ctx)
 
-	case bundleUpdateDeployTarget.FullCommand():
-		err = bundler.UpdateDeployBundle(ctx, bundleUpdateDeployTargetValue)
+	case bundleActivate.FullCommand():
+		info, err := deployer.GetDeployInfo(ctx)
+		if err != nil {
+			logger.Fatal("🚨 Command Failure", err)
+		}
+		err = bundler.Activate(ctx, info.IdlingTarget.Type, bundleActivateName)
 
 	case bundleDownload.FullCommand():
-		err = bundler.DownloadBundle(ctx, bundleDownloadFile)
+		var targetType internal.TargetType
+		if *bundleDownloadTarget == "blue" {
+			targetType = internal.BlueTargetType
+		} else if *bundleDownloadTarget == "green" {
+			targetType = internal.GreenTargetType
+		} else {
+			logger.Fatal("🚨 Command Failure", errors.New("the only valid values for the target flag are 'blue' and 'green'"))
+		}
+		err = bundler.Download(ctx, targetType)
 
 	case ec2status.FullCommand():
 		err = deployer.ShowStatus(ctx)
 
 	case ec2deploy.FullCommand():
-		// Existence check
-		if _, err = bundler.GetDeployBundle(ctx, nil, false); err != nil {
-			break
+		if *ec2deployNoConfirm == false {
+			logger.Info("Start deployment process")
+			if internal.AskToContinue() == false {
+				logger.Fatal("🚨 Command Cancelled", nil)
+			}
 		}
 		err = deployer.Deploy(ctx, true, true, *ec2deployCleanup)
 
 	case ec2rollback.FullCommand():
-		if err = bundler.RollbackDeployBundle(ctx); err != nil {
-			break
+		if *ec2rollbackNoConfirm == false {
+			logger.Warn("Start rollback process", nil)
+			if internal.AskToContinue() == false {
+				logger.Fatal("🚨 Command Cancelled", nil)
+			}
 		}
 		err = deployer.Deploy(ctx, true, false, false)
 
@@ -117,8 +147,8 @@ func main() {
 	case ec2swap.FullCommand():
 		err = deployer.SwapTraffic(ctx)
 
-	case ec2asg.FullCommand():
-		_, err = deployer.UpdateAutoScalingGroup(ctx, ec2asgName, ec2asgDesired, ec2asgMinSize, ec2asgMaxSize, false)
+	case ec2updateASG.FullCommand():
+		_, err = deployer.UpdateAutoScalingGroup(ctx, ec2updateASGName, ec2updateASGDesired, ec2updateASGMinSize, ec2updateASGMaxSize, false)
 
 	default:
 		kingpin.Usage()

@@ -3,6 +3,7 @@ package internal
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3Types "github.com/aws/aws-sdk-go-v2/service/s3/types"
@@ -21,9 +22,9 @@ var (
 )
 
 const (
-	BundlePrefix   string = "bundles/"
-	DeployBundle   string = "deploy_bundle"
-	MaxKeepBundles int    = 100
+	BundlePrefix             string = "bundles/"
+	ActivatedBundleKeyPrefix string = "activated_bundle_"
+	MaxKeepBundles           int    = 100
 )
 
 type Bundler struct {
@@ -31,6 +32,11 @@ type Bundler struct {
 	region *string
 	config *Config
 	logger Logger
+}
+
+type BundleInfo struct {
+	Value        *string
+	LastModified *time.Time
 }
 
 func NewBundler(awsRegion *string, awsConfig *aws.Config, deployConfig *Config, logger Logger) *Bundler {
@@ -59,7 +65,49 @@ func (b *Bundler) listBundles(ctx context.Context, bucket *string) (*[]s3Types.O
 	return &output.Contents, nil
 }
 
-func (b *Bundler) RegisterBundle(ctx context.Context, uploadFile *string, bundleName *string) error {
+func (b *Bundler) ListBundles(ctx context.Context) error {
+	blueBundle, err := b.getActivatedBundle(ctx, BlueTargetType)
+	if err != nil {
+		return err
+	}
+
+	greenBundle, err := b.getActivatedBundle(ctx, GreenTargetType)
+	if err != nil {
+		return err
+	}
+
+	bundleObjects, err := b.listBundles(ctx, &b.config.BundleBucket)
+	if err != nil {
+		return err
+	}
+
+	var data [][]string
+	for i, bundleObject := range *bundleObjects {
+		status := ""
+		if strings.Contains(*bundleObject.Key, *blueBundle.Value) {
+			status = "activated:blue"
+		} else if strings.Contains(*bundleObject.Key, *greenBundle.Value) {
+			status = "activated:green"
+		}
+
+		data = append(data, []string{
+			strconv.Itoa(i + 1),
+			bundleObject.LastModified.In(JST).Format(time.RFC3339),
+			strings.Replace(*bundleObject.Key, BundlePrefix, "", 1),
+			status,
+		})
+	}
+
+	fmt.Printf("Bucket: %s\n", b.config.BundleBucket)
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{"#", "last updated", "bundle name", "status"})
+	table.AppendBulk(data)
+	table.Render()
+
+	return nil
+}
+
+func (b *Bundler) Register(ctx context.Context, uploadFile *string, bundleName *string) error {
 	createBucketIfNotExsists := func() error {
 		_, err := b.s3.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: &b.config.BundleBucket})
 		var apiErr smithy.APIError
@@ -153,53 +201,13 @@ func (b *Bundler) RegisterBundle(ctx context.Context, uploadFile *string, bundle
 		return errors.WithStack(err)
 	}
 
-	err = b.UpdateDeployBundle(ctx, bundleName)
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
 
-func (b *Bundler) ListBundles(ctx context.Context) error {
-	deployBundle, err := b.GetDeployBundle(ctx, nil, false)
-	if err != nil {
-		return err
-	}
-
-	objects, err := b.listBundles(ctx, &b.config.BundleBucket)
-	if err != nil {
-		return err
-	}
-
-	var data [][]string
-	for i, object := range *objects {
-		currentlyInUse := ""
-		if strings.Contains(*object.Key, *deployBundle) {
-			currentlyInUse = "running"
-		}
-
-		data = append(data, []string{
-			strconv.Itoa(i + 1),
-			object.LastModified.In(JST).Format(time.RFC3339),
-			*object.Key,
-			currentlyInUse,
-		})
-	}
-
-	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"#", "last updated", "bundle name", "usage"})
-	table.AppendBulk(data)
-	table.Render()
-
-	return nil
-}
-
-func (b *Bundler) GetDeployBundle(ctx context.Context, versionId *string, showOutput bool) (*string, error) {
+func (b *Bundler) getActivatedBundle(ctx context.Context, targetType TargetType) (*BundleInfo, error) {
 	output, err := b.s3.GetObject(ctx, &s3.GetObjectInput{
-		Bucket:    aws.String(b.config.BundleBucket),
-		Key:       aws.String(DeployBundle),
-		VersionId: versionId,
+		Bucket: aws.String(b.config.BundleBucket),
+		Key:    aws.String(ActivatedBundleKeyPrefix + string(targetType)),
 	})
 	if err != nil {
 		return nil, errors.WithStack(err)
@@ -210,47 +218,19 @@ func (b *Bundler) GetDeployBundle(ctx context.Context, versionId *string, showOu
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	deployBundle := buf.String()
 
-	if showOutput {
-		table := tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{DeployBundle, "last updated"})
-		table.AppendBulk([][]string{{deployBundle, output.LastModified.In(JST).Format(time.RFC3339)}})
-		table.Render()
-	}
-
-	return &deployBundle, nil
+	return &BundleInfo{
+		Value:        aws.String(buf.String()),
+		LastModified: output.LastModified,
+	}, nil
 }
 
-func (b *Bundler) RollbackDeployBundle(ctx context.Context) error {
-	versionOutput, err := b.s3.ListObjectVersions(ctx, &s3.ListObjectVersionsInput{
-		Bucket:  aws.String(b.config.BundleBucket),
-		Prefix:  aws.String(DeployBundle),
-		MaxKeys: 2,
-	})
-	if err != nil {
-		return errors.WithStack(err)
-	}
-
-	if len(versionOutput.Versions) <= 1 {
-		return errors.Errorf("The process cannot continue because the previous deployment history does not exist. bucket: %s", b.config.BundleBucket)
-	}
-
-	previousVersionId := versionOutput.Versions[1].VersionId
-	deployBundle, err := b.GetDeployBundle(ctx, previousVersionId, false)
-	if err != nil {
-		return err
-	}
-
-	return b.UpdateDeployBundle(ctx, deployBundle)
-}
-
-func (b *Bundler) UpdateDeployBundle(ctx context.Context, deployBundle *string) error {
+func (b *Bundler) Activate(ctx context.Context, targetType TargetType, bundleValue *string) error {
 	_, err := b.s3.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(b.config.BundleBucket),
-		Key:         aws.String(DeployBundle),
+		Key:         aws.String(ActivatedBundleKeyPrefix + string(targetType)),
 		ContentType: aws.String("text/plain"),
-		Body:        strings.NewReader(*deployBundle),
+		Body:        strings.NewReader(*bundleValue),
 	})
 	if err != nil {
 		return errors.WithStack(err)
@@ -259,12 +239,15 @@ func (b *Bundler) UpdateDeployBundle(ctx context.Context, deployBundle *string) 
 	return nil
 }
 
-func (b *Bundler) DownloadBundle(ctx context.Context, fileName *string) error {
-	deployBundle, err := b.GetDeployBundle(ctx, nil, false)
+func (b *Bundler) Download(ctx context.Context, targetType TargetType) error {
+	bundle, err := b.getActivatedBundle(ctx, targetType)
+	if err != nil {
+		return err
+	}
 
 	output, err := b.s3.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: &b.config.BundleBucket,
-		Key:    aws.String(BundlePrefix + *deployBundle),
+		Key:    aws.String(BundlePrefix + *bundle.Value),
 	})
 	if err != nil {
 		return errors.WithStack(err)
@@ -276,12 +259,7 @@ func (b *Bundler) DownloadBundle(ctx context.Context, fileName *string) error {
 		return errors.WithStack(err)
 	}
 
-	writeFileName := *deployBundle
-	if len(*fileName) > 0 {
-		writeFileName = *fileName
-	}
-
-	err = os.WriteFile(writeFileName, buf.Bytes(), 0755)
+	err = os.WriteFile(*bundle.Value, buf.Bytes(), 0755)
 	if err != nil {
 		return errors.WithStack(err)
 	}

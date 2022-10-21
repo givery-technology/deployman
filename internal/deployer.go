@@ -68,109 +68,6 @@ func NewDeployer(awsRegion *string, awsConfig *aws.Config, deployConfig *Config,
 	}
 }
 
-func (d *Deployer) getDeployInfo(ctx context.Context) (*DeployInfo, error) {
-	getTargetGroup := func(rule *albTypes.Rule, targetGroupArns *[]string, cond func(tg *albTypes.TargetGroupTuple) bool) (*albTypes.TargetGroupTuple, error) {
-		for _, action := range rule.Actions {
-			if action.Type != albTypes.ActionTypeEnumForward {
-				continue
-			}
-
-			for _, targetGroup := range action.ForwardConfig.TargetGroups {
-				if !Contains(targetGroupArns, targetGroup.TargetGroupArn) {
-					break
-				}
-
-				if cond(&targetGroup) {
-					return &targetGroup, nil
-				}
-			}
-		}
-
-		return nil, errors.Errorf("MissingTargetGroups: %+v", targetGroupArns)
-	}
-
-	getAutoScalingGroup := func(autoScalingGroups *[]asgTypes.AutoScalingGroup, targetGroupArn *string) (*asgTypes.AutoScalingGroup, error) {
-		for _, autoScalingGroup := range *autoScalingGroups {
-			if Contains(&autoScalingGroup.TargetGroupARNs, targetGroupArn) {
-				return &autoScalingGroup, nil
-			}
-		}
-
-		return nil, errors.Errorf("InvalidTargetGroup: %s", *targetGroupArn)
-	}
-
-	ruleOutput, err := d.alb.DescribeRules(ctx, &alb.DescribeRulesInput{
-		RuleArns: []string{d.config.ListenerRuleArn},
-	})
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-
-	if len(ruleOutput.Rules) <= 0 {
-		return nil, errors.Errorf("MissingListenerRule: %s", d.config.ListenerRuleArn)
-	}
-
-	rule := &ruleOutput.Rules[0]
-	targetGroupArns := &[]string{d.config.Target.Blue.TargetGroupArn, d.config.Target.Green.TargetGroupArn}
-
-	idlingTargetGroup, err := getTargetGroup(rule, targetGroupArns, func(tg *albTypes.TargetGroupTuple) bool {
-		return *tg.Weight == int32(0)
-	})
-	if err != nil {
-		return nil, errors.WithMessage(err, "IdlingTargetGroupError")
-	}
-
-	runningTargetGroup, err := getTargetGroup(rule, targetGroupArns, func(tg *albTypes.TargetGroupTuple) bool {
-		return *tg.Weight != int32(0)
-	})
-	if err != nil {
-		return nil, errors.WithMessage(err, "RunningTargetGroupError")
-	}
-
-	asgOutput, err := d.asg.DescribeAutoScalingGroups(ctx, &asg.DescribeAutoScalingGroupsInput{
-		AutoScalingGroupNames: []string{d.config.Target.Blue.AutoScalingGroupName, d.config.Target.Green.AutoScalingGroupName},
-	})
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-
-	idlingAutoScalingGroup, err := getAutoScalingGroup(&asgOutput.AutoScalingGroups, idlingTargetGroup.TargetGroupArn)
-	if err != nil {
-		return nil, errors.WithMessage(err, "IdlingAutoScalingGroupError")
-	}
-
-	runningAutoScalingGroup, err := getAutoScalingGroup(&asgOutput.AutoScalingGroups, runningTargetGroup.TargetGroupArn)
-	if err != nil {
-		return nil, errors.WithMessage(err, "RunningAutoScalingGroupError")
-	}
-
-	blueOrGreen := func(targetGroupArn *string) TargetType {
-		switch *targetGroupArn {
-		case d.config.Target.Blue.TargetGroupArn:
-			return BlueTargetType
-		case d.config.Target.Green.TargetGroupArn:
-			return GreenTargetType
-		default:
-			return UnknownTargetType
-		}
-	}
-
-	return &DeployInfo{
-		IdlingTarget: &DeployTarget{
-			Type:             blueOrGreen(idlingTargetGroup.TargetGroupArn),
-			ListenerRule:     rule,
-			TargetGroup:      idlingTargetGroup,
-			AutoScalingGroup: idlingAutoScalingGroup,
-		},
-		RunningTarget: &DeployTarget{
-			Type:             blueOrGreen(runningTargetGroup.TargetGroupArn),
-			ListenerRule:     rule,
-			TargetGroup:      runningTargetGroup,
-			AutoScalingGroup: runningAutoScalingGroup,
-		},
-	}, nil
-}
-
 func (d *Deployer) suspendAutoScalingProcesses(ctx context.Context, autoScalingGroupName *string, scalingProcesses *[]string) error {
 	_, err := d.asg.SuspendProcesses(ctx, &asg.SuspendProcessesInput{
 		AutoScalingGroupName: autoScalingGroupName,
@@ -190,95 +87,6 @@ func (d *Deployer) resumeAutoScalingProcesses(ctx context.Context, autoScalingGr
 	})
 	if err != nil {
 		return errors.WithStack(err)
-	}
-
-	return nil
-}
-
-func (d *Deployer) Deploy(ctx context.Context, swap bool, beforeCleanup bool, afterCleanup bool) error {
-	d.logger.Info("Show current deployment status")
-	if err := d.ShowStatus(ctx); err != nil {
-		return err
-	}
-
-	if beforeCleanup {
-		updateResult, err := d.CleanupIdlingTarget(ctx)
-		if err != nil {
-			return err
-		}
-
-		if updateResult == UpdateAutoScalingGroupDone {
-			d.logger.Info("Show deployment status after cleanup")
-			if err := d.ShowStatus(ctx); err != nil {
-				return err
-			}
-		}
-	}
-
-	info, err := d.getDeployInfo(ctx)
-	if err != nil {
-		return err
-	}
-
-	// see: https://docs.aws.amazon.com/codedeploy/latest/userguide/integrations-aws-auto-scaling.html#integrations-aws-auto-scaling-behaviors-mixed-environment
-	scalingProcesses := []string{"AZRebalance", "AlarmNotification", "ScheduledActions", "ReplaceUnhealthy"}
-	if err := d.suspendAutoScalingProcesses(ctx, info.RunningTarget.AutoScalingGroup.AutoScalingGroupName, &scalingProcesses); err != nil {
-		return err
-	}
-	defer func() {
-		if err := d.resumeAutoScalingProcesses(ctx, info.RunningTarget.AutoScalingGroup.AutoScalingGroupName, &scalingProcesses); err != nil {
-			d.logger.Warn("ScalingProcess resumption failed, but the problem is not fatal, so processing continues.", err)
-		}
-	}()
-
-	d.logger.Info(fmt.Sprintf("Start deployment to %s target. Prepare instances of the same amount as %s target.", info.IdlingTarget.Type, info.RunningTarget.Type))
-	if _, err := d.UpdateAutoScalingGroup(ctx,
-		info.IdlingTarget.AutoScalingGroup.AutoScalingGroupName,
-		info.RunningTarget.AutoScalingGroup.DesiredCapacity,
-		info.RunningTarget.AutoScalingGroup.MinSize,
-		info.RunningTarget.AutoScalingGroup.MaxSize,
-		false); err != nil {
-		return err
-	}
-
-	time.Sleep(10 * time.Second) // Wait a bit for stability
-
-	d.logger.Info("Show deployment status after deploy")
-	if err := d.ShowStatus(ctx); err != nil {
-		return err
-	}
-
-	if swap {
-		if err := d.SwapTraffic(ctx); err != nil {
-			return err
-		}
-
-		d.logger.Info("Show deployment status after swap traffic")
-		if err := d.ShowStatus(ctx); err != nil {
-			return err
-		}
-	}
-
-	if afterCleanup {
-		info, err := d.getDeployInfo(ctx)
-		if err != nil {
-			return err
-		}
-
-		d.logger.Info(fmt.Sprintf("Set the target MinSize to zero to clean up instances that are no longer needed. The automatic scale-in will clean up slowly. AutoScalingGroup: %s", *info.RunningTarget.AutoScalingGroup.AutoScalingGroupName))
-		if _, err := d.UpdateAutoScalingGroup(ctx,
-			info.RunningTarget.AutoScalingGroup.AutoScalingGroupName,
-			nil,
-			aws.Int32(0),
-			nil,
-			true); err != nil {
-			return err
-		}
-
-		d.logger.Info("Show deployment status after cleanup")
-		if err = d.ShowStatus(ctx); err != nil {
-			return err
-		}
 	}
 
 	return nil
@@ -404,7 +212,7 @@ func (d *Deployer) ShowStatus(ctx context.Context) error {
 		return &infos, nil
 	}
 
-	info, err := d.getDeployInfo(ctx)
+	info, err := d.GetDeployInfo(ctx)
 	if err != nil {
 		return err
 	}
@@ -434,6 +242,198 @@ func (d *Deployer) ShowStatus(ctx context.Context) error {
 	table.SetHeader([]string{"target", "traffic(%)", "asg:desired", "asg:min", "asg:max", "elb:total", "elb:healthy", "elb:unhealthy", "elb:unused", "elb:initial", "elb:draining"})
 	table.AppendBulk(data)
 	table.Render()
+
+	return nil
+}
+
+func (d *Deployer) GetDeployInfo(ctx context.Context) (*DeployInfo, error) {
+	getTargetGroup := func(rule *albTypes.Rule, targetGroupArns *[]string, cond func(tg *albTypes.TargetGroupTuple) bool) (*albTypes.TargetGroupTuple, error) {
+		for _, action := range rule.Actions {
+			if action.Type != albTypes.ActionTypeEnumForward {
+				continue
+			}
+
+			for _, targetGroup := range action.ForwardConfig.TargetGroups {
+				if !Contains(targetGroupArns, targetGroup.TargetGroupArn) {
+					break
+				}
+
+				if cond(&targetGroup) {
+					return &targetGroup, nil
+				}
+			}
+		}
+
+		return nil, errors.Errorf("MissingTargetGroups: %+v", targetGroupArns)
+	}
+
+	getAutoScalingGroup := func(autoScalingGroups *[]asgTypes.AutoScalingGroup, targetGroupArn *string) (*asgTypes.AutoScalingGroup, error) {
+		for _, autoScalingGroup := range *autoScalingGroups {
+			if Contains(&autoScalingGroup.TargetGroupARNs, targetGroupArn) {
+				return &autoScalingGroup, nil
+			}
+		}
+
+		return nil, errors.Errorf("InvalidTargetGroup: %s", *targetGroupArn)
+	}
+
+	ruleOutput, err := d.alb.DescribeRules(ctx, &alb.DescribeRulesInput{
+		RuleArns: []string{d.config.ListenerRuleArn},
+	})
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	if len(ruleOutput.Rules) <= 0 {
+		return nil, errors.Errorf("MissingListenerRule: %s", d.config.ListenerRuleArn)
+	}
+
+	rule := &ruleOutput.Rules[0]
+	targetGroupArns := &[]string{d.config.Target.Blue.TargetGroupArn, d.config.Target.Green.TargetGroupArn}
+
+	idlingTargetGroup, err := getTargetGroup(rule, targetGroupArns, func(tg *albTypes.TargetGroupTuple) bool {
+		return *tg.Weight == int32(0)
+	})
+	if err != nil {
+		return nil, errors.WithMessage(err, "IdlingTargetGroupError")
+	}
+
+	runningTargetGroup, err := getTargetGroup(rule, targetGroupArns, func(tg *albTypes.TargetGroupTuple) bool {
+		return *tg.Weight != int32(0)
+	})
+	if err != nil {
+		return nil, errors.WithMessage(err, "RunningTargetGroupError")
+	}
+
+	asgOutput, err := d.asg.DescribeAutoScalingGroups(ctx, &asg.DescribeAutoScalingGroupsInput{
+		AutoScalingGroupNames: []string{d.config.Target.Blue.AutoScalingGroupName, d.config.Target.Green.AutoScalingGroupName},
+	})
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	idlingAutoScalingGroup, err := getAutoScalingGroup(&asgOutput.AutoScalingGroups, idlingTargetGroup.TargetGroupArn)
+	if err != nil {
+		return nil, errors.WithMessage(err, "IdlingAutoScalingGroupError")
+	}
+
+	runningAutoScalingGroup, err := getAutoScalingGroup(&asgOutput.AutoScalingGroups, runningTargetGroup.TargetGroupArn)
+	if err != nil {
+		return nil, errors.WithMessage(err, "RunningAutoScalingGroupError")
+	}
+
+	blueOrGreen := func(targetGroupArn *string) TargetType {
+		switch *targetGroupArn {
+		case d.config.Target.Blue.TargetGroupArn:
+			return BlueTargetType
+		case d.config.Target.Green.TargetGroupArn:
+			return GreenTargetType
+		default:
+			return UnknownTargetType
+		}
+	}
+
+	return &DeployInfo{
+		IdlingTarget: &DeployTarget{
+			Type:             blueOrGreen(idlingTargetGroup.TargetGroupArn),
+			ListenerRule:     rule,
+			TargetGroup:      idlingTargetGroup,
+			AutoScalingGroup: idlingAutoScalingGroup,
+		},
+		RunningTarget: &DeployTarget{
+			Type:             blueOrGreen(runningTargetGroup.TargetGroupArn),
+			ListenerRule:     rule,
+			TargetGroup:      runningTargetGroup,
+			AutoScalingGroup: runningAutoScalingGroup,
+		},
+	}, nil
+}
+
+func (d *Deployer) Deploy(ctx context.Context, swap bool, beforeCleanup bool, afterCleanup bool) error {
+	info, err := d.GetDeployInfo(ctx)
+	if err != nil {
+		return err
+	}
+
+	d.logger.Info("Show current deployment status")
+	if err := d.ShowStatus(ctx); err != nil {
+		return err
+	}
+
+	if beforeCleanup {
+		updateResult, err := d.CleanupIdlingTarget(ctx)
+		if err != nil {
+			return err
+		}
+
+		if updateResult == UpdateAutoScalingGroupDone {
+			d.logger.Info("Show deployment status after cleanup")
+			if err := d.ShowStatus(ctx); err != nil {
+				return err
+			}
+		}
+	}
+
+	// see: https://docs.aws.amazon.com/codedeploy/latest/userguide/integrations-aws-auto-scaling.html#integrations-aws-auto-scaling-behaviors-mixed-environment
+	scalingProcesses := []string{"AZRebalance", "AlarmNotification", "ScheduledActions", "ReplaceUnhealthy"}
+	if err := d.suspendAutoScalingProcesses(ctx, info.RunningTarget.AutoScalingGroup.AutoScalingGroupName, &scalingProcesses); err != nil {
+		d.logger.Warn("ScalingProcesses failed to suspend, but will continue processing", err)
+	}
+	defer func() {
+		if err := d.resumeAutoScalingProcesses(ctx, info.RunningTarget.AutoScalingGroup.AutoScalingGroupName, &scalingProcesses); err != nil {
+			d.logger.Warn("ScalingProcesses failed to resume", err)
+		}
+	}()
+
+	d.logger.Info(fmt.Sprintf("Start deployment to %s target. Prepare instances of the same amount as %s target.", info.IdlingTarget.Type, info.RunningTarget.Type))
+	if _, err := d.UpdateAutoScalingGroup(ctx,
+		info.IdlingTarget.AutoScalingGroup.AutoScalingGroupName,
+		info.RunningTarget.AutoScalingGroup.DesiredCapacity,
+		info.RunningTarget.AutoScalingGroup.MinSize,
+		info.RunningTarget.AutoScalingGroup.MaxSize,
+		false); err != nil {
+		return err
+	}
+
+	time.Sleep(10 * time.Second) // Wait a bit for stability
+
+	d.logger.Info("Show deployment status after deploy")
+	if err := d.ShowStatus(ctx); err != nil {
+		return err
+	}
+
+	if swap {
+		if err := d.SwapTraffic(ctx); err != nil {
+			return err
+		}
+
+		d.logger.Info("Show deployment status after swap traffic")
+		if err := d.ShowStatus(ctx); err != nil {
+			return err
+		}
+	}
+
+	if afterCleanup {
+		info, err := d.GetDeployInfo(ctx)
+		if err != nil {
+			return err
+		}
+
+		d.logger.Info(fmt.Sprintf("Set the target MinSize to zero to clean up instances that are no longer needed. The automatic scale-in will clean up slowly. AutoScalingGroup: %s", *info.RunningTarget.AutoScalingGroup.AutoScalingGroupName))
+		if _, err := d.UpdateAutoScalingGroup(ctx,
+			info.RunningTarget.AutoScalingGroup.AutoScalingGroupName,
+			nil,
+			aws.Int32(0),
+			nil,
+			true); err != nil {
+			return err
+		}
+
+		d.logger.Info("Show deployment status after cleanup")
+		if err = d.ShowStatus(ctx); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
@@ -485,7 +485,7 @@ func (d *Deployer) SwapTraffic(ctx context.Context) error {
 		}
 	}
 
-	info, err := d.getDeployInfo(ctx)
+	info, err := d.GetDeployInfo(ctx)
 	if err != nil {
 		return err
 	}
@@ -540,7 +540,7 @@ func (d *Deployer) UpdateAutoScalingGroup(
 }
 
 func (d *Deployer) CleanupIdlingTarget(ctx context.Context) (UpdateAutoScalingGroupResult, error) {
-	info, err := d.getDeployInfo(ctx)
+	info, err := d.GetDeployInfo(ctx)
 	if err != nil {
 		return UpdateAutoScalingGroupSkipped, err
 	}
