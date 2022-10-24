@@ -18,9 +18,9 @@ import (
 )
 
 const (
-	BundlePrefix             string = "bundles/"
-	ActivatedBundleKeyPrefix string = "activated_bundle_"
-	MaxKeepBundles           int    = 100
+	BundlePrefix          string = "bundles/"
+	ActiveBundleKeyPrefix string = "active_bundle_"
+	MaxKeepBundles        int    = 100
 )
 
 type Bundler struct {
@@ -73,12 +73,12 @@ func (b *Bundler) ListBundles(ctx context.Context) error {
 		return true
 	}
 
-	blueBundle, err := b.getActivatedBundle(ctx, BlueTargetType)
+	blueBundle, err := b.getActiveBundle(ctx, BlueTargetType)
 	if hasError(err) {
 		return err
 	}
 
-	greenBundle, err := b.getActivatedBundle(ctx, GreenTargetType)
+	greenBundle, err := b.getActiveBundle(ctx, GreenTargetType)
 	if hasError(err) {
 		return err
 	}
@@ -99,7 +99,7 @@ func (b *Bundler) ListBundles(ctx context.Context) error {
 		}
 		status := ""
 		if len(targets) > 0 {
-			status = "activated:[" + strings.Join(targets, ", ") + "]"
+			status = "active:[" + strings.Join(targets, ", ") + "]"
 		}
 		location := b.config.TimeZone.GetLocation()
 		data = append(data, []string{
@@ -216,10 +216,10 @@ func (b *Bundler) Register(ctx context.Context, uploadFile *string, bundleName *
 	return nil
 }
 
-func (b *Bundler) getActivatedBundle(ctx context.Context, targetType TargetType) (*BundleInfo, error) {
+func (b *Bundler) getActiveBundle(ctx context.Context, targetType TargetType) (*BundleInfo, error) {
 	output, err := b.s3.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(b.config.BundleBucket),
-		Key:    aws.String(ActivatedBundleKeyPrefix + string(targetType)),
+		Key:    aws.String(ActiveBundleKeyPrefix + string(targetType)),
 	})
 	if err != nil {
 		return nil, errors.WithStack(err)
@@ -240,7 +240,7 @@ func (b *Bundler) getActivatedBundle(ctx context.Context, targetType TargetType)
 func (b *Bundler) Activate(ctx context.Context, targetType TargetType, bundleValue *string) error {
 	_, err := b.s3.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(b.config.BundleBucket),
-		Key:         aws.String(ActivatedBundleKeyPrefix + string(targetType)),
+		Key:         aws.String(ActiveBundleKeyPrefix + string(targetType)),
 		ContentType: aws.String("text/plain"),
 		Body:        strings.NewReader(*bundleValue),
 	})
@@ -252,7 +252,7 @@ func (b *Bundler) Activate(ctx context.Context, targetType TargetType, bundleVal
 }
 
 func (b *Bundler) Download(ctx context.Context, targetType TargetType) error {
-	bundle, err := b.getActivatedBundle(ctx, targetType)
+	bundle, err := b.getActiveBundle(ctx, targetType)
 	if err != nil {
 		return err
 	}

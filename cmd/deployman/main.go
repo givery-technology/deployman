@@ -26,11 +26,11 @@ var (
 	bundleRegister         = bundle.Command("register", "Register new application bundle. By default, register bundles associated with idle AutoScalingGroups.")
 	bundleRegisterFilepath = bundleRegister.Flag("file", "File path").Required().String()
 	bundleRegisterName     = bundleRegister.Flag("name", "Name of bundle to be registered").Required().String()
-	bundleRegisterActivate = bundleRegister.Flag("with-activate", "Activate registered bundles.").Bool()
+	bundleRegisterActivate = bundleRegister.Flag("with-activate", "To active a registered bundles.").Bool()
 	bundleList             = bundle.Command("list", "List registered application bundles.")
-	bundleActivate         = bundle.Command("activate", "Activate one of the registered bundles. The activated bundle will be used for the next deployment or scale-out.")
+	bundleActivate         = bundle.Command("activate", "Activate one of the registered bundles. The active bundle will be used for the next deployment or scale-out.")
 	bundleActivateTarget   = bundleActivate.Flag("target", "Target type for bundle. Valid values are either 'blue' or 'green'").Enum("blue", "green")
-	bundleActivateName     = bundleActivate.Flag("name", "Name of bundle to activate").Required().String()
+	bundleActivateValue    = bundleActivate.Flag("value", "Value of bundle to active").Required().String()
 	bundleDownload         = bundle.Command("download", "Download application bundle file.")
 	bundleDownloadTarget   = bundleDownload.Flag("target", "Target type for bundle. Valid values are either 'blue' or 'green'").Enum("blue", "green")
 
@@ -119,7 +119,7 @@ func main() {
 			}
 			targetType = info.IdlingTarget.Type
 		}
-		err = bundler.Activate(ctx, targetType, bundleActivateName)
+		err = bundler.Activate(ctx, targetType, bundleActivateValue)
 
 	case bundleDownload.FullCommand():
 		var targetType internal.TargetType
