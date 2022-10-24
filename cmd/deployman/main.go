@@ -42,13 +42,16 @@ var (
 	ec2rollback          = ec2.Command("rollback", "Restore the AutoScalingGroup to their original state, then swap traffic.")
 	ec2rollbackNoConfirm = ec2rollback.Flag("y", "Skip confirmation before process.").Default("false").Bool()
 
-	ec2cleanup          = ec2.Command("cleanup", "Cleanup idling AutoScalingGroup's instances.")
-	ec2swap             = ec2.Command("swap", "Swap traffic from a running AutoScalingGroup to an idling AutoScalingGroup.")
-	ec2updateASG        = ec2.Command("update-autoscaling", "Update capacity of AutoScalingGroup.")
-	ec2updateASGName    = ec2updateASG.Flag("name", "Name of AutoScalingGroup").Required().String()
-	ec2updateASGDesired = ec2updateASG.Flag("desired", "DesiredCapacity").Int32()
-	ec2updateASGMinSize = ec2updateASG.Flag("min", "MinSize").Int32()
-	ec2updateASGMaxSize = ec2updateASG.Flag("max", "MaxSize").Int32()
+	ec2cleanup                  = ec2.Command("cleanup", "Cleanup idling AutoScalingGroup's instances.")
+	ec2swap                     = ec2.Command("swap", "Swap traffic from a running AutoScalingGroup to an idling AutoScalingGroup.")
+	ec2updateASG                = ec2.Command("update-autoscaling", "Update capacity of AutoScalingGroup.")
+	ec2updateASGName            = ec2updateASG.Flag("name", "Name of AutoScalingGroup").Required().String()
+	ec2updateASGDesired         = ec2updateASG.Flag("desired", "DesiredCapacity").Int32()
+	ec2updateASGMinSize         = ec2updateASG.Flag("min", "MinSize").Int32()
+	ec2updateASGMaxSize         = ec2updateASG.Flag("max", "MaxSize").Int32()
+	ec2moveScheduledActions     = ec2.Command("move-schaduled-actions", "Move ScheduledActions of AutoScalingGroup.")
+	ec2moveScheduledActionsFrom = ec2moveScheduledActions.Flag("from", "Name of AutoScalingGroup").Required().String()
+	ec2moveScheduledActionsTo   = ec2moveScheduledActions.Flag("to", "Name of AutoScalingGroup").Required().String()
 )
 
 func main() {
@@ -158,6 +161,9 @@ func main() {
 
 	case ec2updateASG.FullCommand():
 		_, err = deployer.UpdateAutoScalingGroup(ctx, ec2updateASGName, ec2updateASGDesired, ec2updateASGMinSize, ec2updateASGMaxSize, false)
+
+	case ec2moveScheduledActions.FullCommand():
+		err = deployer.MoveScheduledActions(ctx, ec2moveScheduledActionsFrom, ec2moveScheduledActionsTo)
 
 	default:
 		kingpin.Usage()

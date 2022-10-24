@@ -68,29 +68,29 @@ func NewDeployer(awsRegion *string, awsConfig *aws.Config, deployConfig *Config,
 	}
 }
 
-func (d *Deployer) suspendAutoScalingProcesses(ctx context.Context, autoScalingGroupName *string, scalingProcesses *[]string) error {
-	_, err := d.asg.SuspendProcesses(ctx, &asg.SuspendProcessesInput{
-		AutoScalingGroupName: autoScalingGroupName,
-		ScalingProcesses:     *scalingProcesses,
-	})
-	if err != nil {
-		return errors.WithStack(err)
-	}
-
-	return nil
-}
-
-func (d *Deployer) resumeAutoScalingProcesses(ctx context.Context, autoScalingGroupName *string, scalingProcesses *[]string) error {
-	_, err := d.asg.ResumeProcesses(ctx, &asg.ResumeProcessesInput{
-		AutoScalingGroupName: autoScalingGroupName,
-		ScalingProcesses:     *scalingProcesses,
-	})
-	if err != nil {
-		return errors.WithStack(err)
-	}
-
-	return nil
-}
+//func (d *Deployer) suspendAutoScalingProcesses(ctx context.Context, autoScalingGroupName *string, scalingProcesses *[]string) error {
+//	_, err := d.asg.SuspendProcesses(ctx, &asg.SuspendProcessesInput{
+//		AutoScalingGroupName: autoScalingGroupName,
+//		ScalingProcesses:     *scalingProcesses,
+//	})
+//	if err != nil {
+//		return errors.WithStack(err)
+//	}
+//
+//	return nil
+//}
+//
+//func (d *Deployer) resumeAutoScalingProcesses(ctx context.Context, autoScalingGroupName *string, scalingProcesses *[]string) error {
+//	_, err := d.asg.ResumeProcesses(ctx, &asg.ResumeProcessesInput{
+//		AutoScalingGroupName: autoScalingGroupName,
+//		ScalingProcesses:     *scalingProcesses,
+//	})
+//	if err != nil {
+//		return errors.WithStack(err)
+//	}
+//
+//	return nil
+//}
 
 func (d *Deployer) getHealthInfo(ctx context.Context, targetGroupArn *string) *HealthInfo {
 	health, err := d.alb.DescribeTargetHealth(ctx, &alb.DescribeTargetHealthInput{
@@ -166,12 +166,14 @@ func (d *Deployer) ShowStatus(ctx context.Context) error {
 		for _, info := range *healthInfos {
 			if info.TargetGroupArn == *target.TargetGroup.TargetGroupArn {
 				currentHealth = info
+				break
 			}
 		}
 
 		return &[]string{
 			fmt.Sprint(target.Type),
 			fmt.Sprint(*targetWeight),
+			fmt.Sprint(*autoScalingGroup.AutoScalingGroupName),
 			fmt.Sprint(*autoScalingGroup.DesiredCapacity),
 			fmt.Sprint(*autoScalingGroup.MinSize),
 			fmt.Sprint(*autoScalingGroup.MaxSize),
@@ -223,7 +225,6 @@ func (d *Deployer) ShowStatus(ctx context.Context) error {
 	}
 
 	autoScalingGroups := []asgTypes.AutoScalingGroup{*info.IdlingTarget.AutoScalingGroup, *info.RunningTarget.AutoScalingGroup}
-
 	blue, err := collect(info, healthInfos, &autoScalingGroups, BlueTargetType)
 	if err != nil {
 		return err
@@ -237,9 +238,8 @@ func (d *Deployer) ShowStatus(ctx context.Context) error {
 	var data [][]string
 	data = append(data, *blue)
 	data = append(data, *green)
-
 	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"target", "traffic(%)", "asg:desired", "asg:min", "asg:max", "elb:total", "elb:healthy", "elb:unhealthy", "elb:unused", "elb:initial", "elb:draining"})
+	table.SetHeader([]string{"target", "traffic(%)", "asg:name", "asg:desired", "asg:min", "asg:max", "elb:total", "elb:healthy", "elb:unhealthy", "elb:unused", "elb:initial", "elb:draining"})
 	table.AppendBulk(data)
 	table.Render()
 
@@ -374,16 +374,16 @@ func (d *Deployer) Deploy(ctx context.Context, swap bool, beforeCleanup bool, af
 		}
 	}
 
-	// see: https://docs.aws.amazon.com/codedeploy/latest/userguide/integrations-aws-auto-scaling.html#integrations-aws-auto-scaling-behaviors-mixed-environment
-	scalingProcesses := []string{"AZRebalance", "AlarmNotification", "ScheduledActions", "ReplaceUnhealthy"}
-	if err := d.suspendAutoScalingProcesses(ctx, info.RunningTarget.AutoScalingGroup.AutoScalingGroupName, &scalingProcesses); err != nil {
-		d.logger.Warn("ScalingProcesses failed to suspend, but will continue processing", err)
-	}
-	defer func() {
-		if err := d.resumeAutoScalingProcesses(ctx, info.RunningTarget.AutoScalingGroup.AutoScalingGroupName, &scalingProcesses); err != nil {
-			d.logger.Warn("ScalingProcesses failed to resume", err)
-		}
-	}()
+	//// see: https://docs.aws.amazon.com/codedeploy/latest/userguide/integrations-aws-auto-scaling.html#integrations-aws-auto-scaling-behaviors-mixed-environment
+	//scalingProcesses := []string{"AZRebalance", "AlarmNotification", "ScheduledActions", "ReplaceUnhealthy"}
+	//if err := d.suspendAutoScalingProcesses(ctx, info.RunningTarget.AutoScalingGroup.AutoScalingGroupName, &scalingProcesses); err != nil {
+	//	d.logger.Warn("ScalingProcesses failed to suspend, but will continue processing", err)
+	//}
+	//defer func() {
+	//	if err := d.resumeAutoScalingProcesses(ctx, info.RunningTarget.AutoScalingGroup.AutoScalingGroupName, &scalingProcesses); err != nil {
+	//		d.logger.Warn("ScalingProcesses failed to resume", err)
+	//	}
+	//}()
 
 	d.logger.Info(fmt.Sprintf("Start deployment to %s target. Prepare instances of the same amount as %s target.", info.IdlingTarget.Type, info.RunningTarget.Type))
 	if _, err := d.UpdateAutoScalingGroup(ctx,
@@ -555,4 +555,47 @@ func (d *Deployer) CleanupIdlingTarget(ctx context.Context) (UpdateAutoScalingGr
 		aws.Int32(0),
 		nil,
 		false)
+}
+
+func (d *Deployer) MoveScheduledActions(ctx context.Context, fromAutoScalingGroupName *string, toAutoScalingGroupName *string) error {
+	output, err := d.asg.DescribeScheduledActions(ctx, &asg.DescribeScheduledActionsInput{
+		AutoScalingGroupName: fromAutoScalingGroupName,
+	})
+	if err != nil {
+		return errors.WithStack(err)
+	}
+
+	if len(output.ScheduledUpdateGroupActions) <= 0 {
+		return nil
+	}
+
+	msg := fmt.Sprintf(" from:%s, to:%s", *fromAutoScalingGroupName, *toAutoScalingGroupName)
+	for _, from := range output.ScheduledUpdateGroupActions {
+		_, err := d.asg.PutScheduledUpdateGroupAction(ctx, &asg.PutScheduledUpdateGroupActionInput{
+			AutoScalingGroupName: toAutoScalingGroupName,
+			ScheduledActionName:  from.ScheduledActionName,
+			DesiredCapacity:      from.DesiredCapacity,
+			EndTime:              from.EndTime,
+			MaxSize:              from.MaxSize,
+			MinSize:              from.MinSize,
+			Recurrence:           from.Recurrence,
+			StartTime:            from.StartTime,
+			Time:                 from.Time,
+			TimeZone:             from.TimeZone,
+		})
+		if err != nil {
+			d.logger.Warn("Failed to copy ScheduledActions, but processing continues."+msg, err)
+			continue
+		}
+		_, err = d.asg.DeleteScheduledAction(ctx, &asg.DeleteScheduledActionInput{
+			AutoScalingGroupName: from.AutoScalingGroupName,
+			ScheduledActionName:  from.ScheduledActionName,
+		})
+		if err != nil {
+			d.logger.Warn("Failed to delete ScheduledActions, but processing continues."+msg, err)
+			continue
+		}
+	}
+
+	return nil
 }
