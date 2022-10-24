@@ -238,9 +238,11 @@ func (b *Bundler) getActiveBundle(ctx context.Context, targetType TargetType) (*
 }
 
 func (b *Bundler) Activate(ctx context.Context, targetType TargetType, bundleValue *string) error {
+	key := ActiveBundleKeyPrefix + string(targetType)
+	b.logger.Info(fmt.Sprintf("'%s' registered in 's3://%s/%s'", *bundleValue, b.config.BundleBucket, key))
 	_, err := b.s3.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(b.config.BundleBucket),
-		Key:         aws.String(ActiveBundleKeyPrefix + string(targetType)),
+		Key:         aws.String(key),
 		ContentType: aws.String("text/plain"),
 		Body:        strings.NewReader(*bundleValue),
 	})
