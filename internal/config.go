@@ -49,7 +49,7 @@ func (t *TimeZone) GetLocation() *time.Location {
 func NewConfig(filename *string) (*Config, error) {
 	config := &Config{
 		RetryPolicy: RetryPolicy{
-			MaxLimit:        30,
+			MaxLimit:        360,
 			IntervalSeconds: 10,
 		},
 		TimeZone: TimeZone{

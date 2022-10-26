@@ -68,6 +68,7 @@ func NewDeployer(awsRegion *string, awsConfig *aws.Config, deployConfig *Config,
 	}
 }
 
+//TODO: Actually, it may be necessary, so I'll keep it as a comment.
 //func (d *Deployer) suspendAutoScalingProcesses(ctx context.Context, autoScalingGroupName *string, scalingProcesses *[]string) error {
 //	_, err := d.asg.SuspendProcesses(ctx, &asg.SuspendProcessesInput{
 //		AutoScalingGroupName: autoScalingGroupName,
@@ -349,7 +350,7 @@ func (d *Deployer) GetDeployInfo(ctx context.Context) (*DeployInfo, error) {
 	}, nil
 }
 
-func (d *Deployer) Deploy(ctx context.Context, swap bool, beforeCleanup bool, afterCleanup bool) error {
+func (d *Deployer) Deploy(ctx context.Context, swap bool, beforeCleanup bool, afterCleanup bool, swapDuration *time.Duration) error {
 	info, err := d.GetDeployInfo(ctx)
 	if err != nil {
 		return err
@@ -374,6 +375,7 @@ func (d *Deployer) Deploy(ctx context.Context, swap bool, beforeCleanup bool, af
 		}
 	}
 
+	//TODO: Actually, it may be necessary, so I'll keep it as a comment.
 	//// see: https://docs.aws.amazon.com/codedeploy/latest/userguide/integrations-aws-auto-scaling.html#integrations-aws-auto-scaling-behaviors-mixed-environment
 	//scalingProcesses := []string{"AZRebalance", "AlarmNotification", "ScheduledActions", "ReplaceUnhealthy"}
 	//if err := d.suspendAutoScalingProcesses(ctx, info.RunningTarget.AutoScalingGroup.AutoScalingGroupName, &scalingProcesses); err != nil {
@@ -395,7 +397,10 @@ func (d *Deployer) Deploy(ctx context.Context, swap bool, beforeCleanup bool, af
 		return err
 	}
 
-	time.Sleep(10 * time.Second) // Wait a bit for stability
+	d.logger.Info(fmt.Sprintf("Start healthcheck for %s target.", info.IdlingTarget.Type))
+	if err := d.HealthCheck(ctx, info.IdlingTarget.TargetGroup.TargetGroupArn); err != nil {
+		return err
+	}
 
 	d.logger.Info("Show deployment status after deploy")
 	if err := d.ShowStatus(ctx); err != nil {
@@ -403,7 +408,7 @@ func (d *Deployer) Deploy(ctx context.Context, swap bool, beforeCleanup bool, af
 	}
 
 	if swap {
-		if err := d.SwapTraffic(ctx); err != nil {
+		if err := d.SwapTraffic(ctx, swapDuration); err != nil {
 			return err
 		}
 
@@ -438,9 +443,33 @@ func (d *Deployer) Deploy(ctx context.Context, swap bool, beforeCleanup bool, af
 	return nil
 }
 
+func (d *Deployer) HealthCheck(ctx context.Context, targetGroupArn *string) error {
+	return NewFixedIntervalRetryer(d.config.RetryPolicy.MaxLimit, time.Duration(d.config.RetryPolicy.IntervalSeconds)*time.Second).Start(
+		func(index int, interval *time.Duration) (RetryResult, error) {
+			health := d.getHealthInfo(ctx, targetGroupArn)
+			if health.Error != nil {
+				return FinishRetry, errors.WithMessage(health.Error, "HealthCheck was aborted")
+			}
+
+			if health.HealthyCount == health.TotalCount {
+				d.logger.Info("HealthCheck was completed")
+				return FinishRetry, nil
+			} else {
+				d.logger.Info(fmt.Sprintf("HealthCheck total:%d, healthy:%d, unhealthy:%d, unused:%d, init:%d, drain:%d",
+					health.TotalCount,
+					health.HealthyCount,
+					health.UnhealthyCount,
+					health.UnusedCount,
+					health.InitialCount,
+					health.DrainingCount,
+				))
+				return ContinueRetry, nil
+			}
+		})
+}
+
 func (d *Deployer) UpdateTraffic(ctx context.Context, blueWeight *int32, greenWeight *int32) error {
 	d.logger.Info(fmt.Sprintf("Start update traffic. blue: %d%%, green: %d%%", *blueWeight, *greenWeight))
-
 	_, err := d.alb.ModifyRule(ctx, &alb.ModifyRuleInput{
 		RuleArn: &d.config.ListenerRuleArn,
 		Actions: []albTypes.Action{
@@ -474,30 +503,37 @@ func (d *Deployer) UpdateTraffic(ctx context.Context, blueWeight *int32, greenWe
 	return nil
 }
 
-func (d *Deployer) SwapTraffic(ctx context.Context) error {
-	decideWeight := func(info *DeployInfo, typ TargetType) *int32 {
-		if info.IdlingTarget.Type == typ {
-			return info.IdlingTarget.TargetGroup.Weight
-		} else if info.RunningTarget.Type == typ {
-			return info.RunningTarget.TargetGroup.Weight
-		} else {
-			return nil
-		}
-	}
-
+func (d *Deployer) SwapTraffic(ctx context.Context, duration *time.Duration) error {
 	info, err := d.GetDeployInfo(ctx)
 	if err != nil {
 		return err
 	}
 
-	blueWeight := decideWeight(info, BlueTargetType)
-	if blueWeight == nil {
-		return errors.New("MissingBlueTargetGroup")
+	if *duration > 0 {
+		if err := d.UpdateTraffic(ctx, aws.Int32(50), aws.Int32(50)); err != nil {
+			return err
+		}
+		time.Sleep(*duration)
 	}
 
-	greenWeight := decideWeight(info, GreenTargetType)
-	if greenWeight == nil {
-		return errors.New("MissingGreenTargetGroup")
+	decideWeight := func(info *DeployInfo, typ TargetType) (*int32, error) {
+		if info.IdlingTarget.Type == typ {
+			return info.IdlingTarget.TargetGroup.Weight, nil
+		} else if info.RunningTarget.Type == typ {
+			return info.RunningTarget.TargetGroup.Weight, nil
+		} else {
+			return nil, errors.New("MissingBlueTargetGroup")
+		}
+	}
+
+	blueWeight, err := decideWeight(info, BlueTargetType)
+	if err != nil {
+		return err
+	}
+
+	greenWeight, err := decideWeight(info, GreenTargetType)
+	if err != nil {
+		return err
 	}
 
 	return d.UpdateTraffic(ctx, greenWeight, blueWeight)

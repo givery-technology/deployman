@@ -39,6 +39,7 @@ var (
 	ec2deploy            = ec2.Command("deploy", "Deploy a new application to an idling AutoScalingGroup.")
 	ec2deployNoConfirm   = ec2deploy.Flag("y", "Skip confirmation before process.").Default("false").Bool()
 	ec2deployCleanup     = ec2deploy.Flag("cleanup", "Cleanup idling AutoScalingGroup's instances. Cleanup is done slowly by scale-in action.").Default("true").Bool()
+	ec2deploySwapTime    = ec2deploy.Flag("swap-time", "Time (in seconds) to swap traffic. Default is 0. e.g., if set to 60 seconds, it will keep both blue and green targets mixed without swapping immediately, and the older target will leave after 60 seconds.").Default("0").Duration()
 	ec2rollback          = ec2.Command("rollback", "Restore the AutoScalingGroup to their original state, then swap traffic.")
 	ec2rollbackNoConfirm = ec2rollback.Flag("y", "Skip confirmation before process.").Default("false").Bool()
 
@@ -142,7 +143,7 @@ func main() {
 				logger.Fatal("🚨 Command Cancelled", nil)
 			}
 		}
-		err = deployer.Deploy(ctx, true, true, *ec2deployCleanup)
+		err = deployer.Deploy(ctx, true, true, *ec2deployCleanup, aws.Duration(*ec2deploySwapTime*time.Second))
 
 	case ec2rollback.FullCommand():
 		if *ec2rollbackNoConfirm == false {
@@ -151,13 +152,13 @@ func main() {
 				logger.Fatal("🚨 Command Cancelled", nil)
 			}
 		}
-		err = deployer.Deploy(ctx, true, false, false)
+		err = deployer.Deploy(ctx, true, false, false, aws.Duration(0))
 
 	case ec2cleanup.FullCommand():
 		_, err = deployer.CleanupIdlingTarget(ctx)
 
 	case ec2swap.FullCommand():
-		err = deployer.SwapTraffic(ctx)
+		err = deployer.SwapTraffic(ctx, aws.Duration(0))
 
 	case ec2updateASG.FullCommand():
 		_, err = deployer.UpdateAutoScalingGroup(ctx, ec2updateASGName, ec2updateASGDesired, ec2updateASGMinSize, ec2updateASGMaxSize, false)
