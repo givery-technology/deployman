@@ -15,9 +15,8 @@ import (
 )
 
 const (
-	BlueTargetType    TargetType = "blue"
-	GreenTargetType   TargetType = "green"
-	UnknownTargetType TargetType = "unknown"
+	BlueTargetType  TargetType = "blue"
+	GreenTargetType TargetType = "green"
 
 	UpdateAutoScalingGroupSkipped UpdateAutoScalingGroupResult = false
 	UpdateAutoScalingGroupDone    UpdateAutoScalingGroupResult = true
@@ -37,7 +36,6 @@ type Deployer struct {
 
 type DeployTarget struct {
 	Type             TargetType
-	ListenerRule     *albTypes.Rule
 	TargetGroup      *albTypes.TargetGroupTuple
 	AutoScalingGroup *asgTypes.AutoScalingGroup
 }
@@ -118,127 +116,71 @@ func (d *Deployer) getHealthInfo(ctx context.Context, targetGroupArn *string) *H
 	}
 }
 
-func (d *Deployer) ShowStatus(ctx context.Context) error {
-	getAutoScalingGroup := func(autoScalingGroups *[]asgTypes.AutoScalingGroup, autoScalingGroupName *string) (*asgTypes.AutoScalingGroup, error) {
-		for _, autoScalingGroup := range *autoScalingGroups {
-			if *autoScalingGroup.AutoScalingGroupName == *autoScalingGroupName {
-				return &autoScalingGroup, nil
-			}
-		}
-
-		return nil, errors.Errorf("MissingAutoScalingGroup: %s", *autoScalingGroupName)
+func (d *Deployer) getDeployTarget(ctx context.Context, targetType TargetType, target *Target) (*DeployTarget, error) {
+	ruleOutput, err := d.alb.DescribeRules(ctx, &alb.DescribeRulesInput{RuleArns: []string{d.config.ListenerRuleArn}})
+	if err != nil {
+		return nil, errors.WithStack(err)
 	}
+	listenerRule := ruleOutput.Rules[0]
 
-	getTargetWeight := func(rule *albTypes.Rule, targetGroupArn *string) (*int32, error) {
-		for _, action := range rule.Actions {
-			if action.Type == albTypes.ActionTypeEnumForward {
-				for _, targetGroup := range action.ForwardConfig.TargetGroups {
-					if *targetGroup.TargetGroupArn == *targetGroupArn {
-						return targetGroup.Weight, nil
-					}
+	var targetGroupTuple *albTypes.TargetGroupTuple
+	for _, action := range listenerRule.Actions {
+		if action.Type == albTypes.ActionTypeEnumForward {
+			for _, tg := range action.ForwardConfig.TargetGroups {
+				if tg.TargetGroupArn == &target.TargetGroupArn {
+					targetGroupTuple = &tg
+					break
 				}
 			}
 		}
-
-		return nil, errors.Errorf("MissingTargetGroup: %s", *targetGroupArn)
+	}
+	asgOutput, err := d.asg.DescribeAutoScalingGroups(ctx, &asg.DescribeAutoScalingGroupsInput{AutoScalingGroupNames: []string{target.AutoScalingGroupName}})
+	if err != nil {
+		return nil, errors.WithStack(err)
 	}
 
-	collect := func(info *DeployInfo, healthInfos *[]HealthInfo, autoScalingGroups *[]asgTypes.AutoScalingGroup, targetType TargetType) (*[]string, error) {
-		var target *DeployTarget
-		if info.RunningTarget.Type == targetType {
-			target = info.RunningTarget
-		} else if info.IdlingTarget.Type == targetType {
-			target = info.IdlingTarget
-		} else {
-			return nil, errors.Errorf("MissingDeployTarget: %s", targetType)
-		}
+	return &DeployTarget{
+		Type:             targetType,
+		TargetGroup:      targetGroupTuple,
+		AutoScalingGroup: &asgOutput.AutoScalingGroups[0],
+	}, nil
+}
 
-		autoScalingGroup, err := getAutoScalingGroup(autoScalingGroups, target.AutoScalingGroup.AutoScalingGroupName)
-		if err != nil {
-			return nil, err
-		}
+func (d *Deployer) ShowStatus(ctx context.Context) error {
+	blue, err := d.getDeployTarget(ctx, BlueTargetType, &d.config.Target.Blue)
+	if err != nil {
+		return err
+	}
+	blueHealth := d.getHealthInfo(ctx, &d.config.Target.Blue.TargetGroupArn)
 
-		targetWeight, err := getTargetWeight(target.ListenerRule, target.TargetGroup.TargetGroupArn)
-		if err != nil {
-			return nil, err
-		}
+	green, err := d.getDeployTarget(ctx, GreenTargetType, &d.config.Target.Green)
+	if err != nil {
+		return err
+	}
+	greenHealth := d.getHealthInfo(ctx, &d.config.Target.Green.TargetGroupArn)
 
-		var currentHealth HealthInfo
-		for _, info := range *healthInfos {
-			if info.TargetGroupArn == *target.TargetGroup.TargetGroupArn {
-				currentHealth = info
-				break
-			}
+	toData := func(target *DeployTarget, health *HealthInfo) *[]string {
+		status := "idling"
+		if *target.TargetGroup.Weight > int32(0) {
+			status = "running"
 		}
-
 		return &[]string{
-			fmt.Sprint(target.Type),
-			fmt.Sprint(*targetWeight),
-			fmt.Sprint(*autoScalingGroup.AutoScalingGroupName),
-			fmt.Sprint(*autoScalingGroup.DesiredCapacity),
-			fmt.Sprint(*autoScalingGroup.MinSize),
-			fmt.Sprint(*autoScalingGroup.MaxSize),
-			fmt.Sprint(currentHealth.TotalCount),
-			fmt.Sprint(currentHealth.HealthyCount),
-			fmt.Sprint(currentHealth.UnhealthyCount),
-			fmt.Sprint(currentHealth.UnusedCount),
-			fmt.Sprint(currentHealth.InitialCount),
-			fmt.Sprint(currentHealth.DrainingCount),
-		}, nil
-	}
-
-	getHealthInfos := func(targetGroupArns *[]string) (*[]HealthInfo, error) {
-		done := make(chan *HealthInfo)
-		defer close(done)
-
-		// send
-		for _, targetGroupArn := range *targetGroupArns {
-			go func(targetGroupArn string, done chan *HealthInfo) {
-				health := d.getHealthInfo(ctx, &targetGroupArn)
-				done <- health
-			}(targetGroupArn, done)
+			fmt.Sprint(status),
+			fmt.Sprint(*target.TargetGroup.Weight),
+			fmt.Sprint(*target.AutoScalingGroup.AutoScalingGroupName),
+			fmt.Sprint(*target.AutoScalingGroup.DesiredCapacity),
+			fmt.Sprint(*target.AutoScalingGroup.MinSize),
+			fmt.Sprint(*target.AutoScalingGroup.MaxSize),
+			fmt.Sprint(health.TotalCount),
+			fmt.Sprint(health.HealthyCount),
+			fmt.Sprint(health.UnhealthyCount),
+			fmt.Sprint(health.UnusedCount),
+			fmt.Sprint(health.InitialCount),
+			fmt.Sprint(health.DrainingCount),
 		}
-
-		// recv
-		var infos []HealthInfo
-		for range *targetGroupArns {
-			info := <-done
-			infos = append(infos, *info)
-		}
-
-		for _, info := range infos {
-			if info.Error != nil {
-				return nil, info.Error
-			}
-		}
-
-		return &infos, nil
 	}
 
-	info, err := d.GetDeployInfo(ctx)
-	if err != nil {
-		return err
-	}
-
-	healthInfos, err := getHealthInfos(&[]string{*info.IdlingTarget.TargetGroup.TargetGroupArn, *info.RunningTarget.TargetGroup.TargetGroupArn})
-	if err != nil {
-		return err
-	}
-
-	autoScalingGroups := []asgTypes.AutoScalingGroup{*info.IdlingTarget.AutoScalingGroup, *info.RunningTarget.AutoScalingGroup}
-	blue, err := collect(info, healthInfos, &autoScalingGroups, BlueTargetType)
-	if err != nil {
-		return err
-	}
-
-	green, err := collect(info, healthInfos, &autoScalingGroups, GreenTargetType)
-	if err != nil {
-		return err
-	}
-
-	var data [][]string
-	data = append(data, *blue)
-	data = append(data, *green)
+	data := [][]string{*toData(blue, blueHealth), *toData(green, greenHealth)}
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetHeader([]string{"target", "traffic(%)", "asg:name", "asg:desired", "asg:min", "asg:max", "elb:total", "elb:healthy", "elb:unhealthy", "elb:unused", "elb:initial", "elb:draining"})
 	table.AppendBulk(data)
@@ -248,106 +190,29 @@ func (d *Deployer) ShowStatus(ctx context.Context) error {
 }
 
 func (d *Deployer) GetDeployInfo(ctx context.Context) (*DeployInfo, error) {
-	getTargetGroup := func(rule *albTypes.Rule, targetGroupArns *[]string, cond func(tg *albTypes.TargetGroupTuple) bool) (*albTypes.TargetGroupTuple, error) {
-		for _, action := range rule.Actions {
-			if action.Type != albTypes.ActionTypeEnumForward {
-				continue
-			}
-
-			for _, targetGroup := range action.ForwardConfig.TargetGroups {
-				if !Contains(targetGroupArns, targetGroup.TargetGroupArn) {
-					break
-				}
-
-				if cond(&targetGroup) {
-					return &targetGroup, nil
-				}
-			}
-		}
-
-		return nil, errors.Errorf("MissingTargetGroups: %+v", targetGroupArns)
-	}
-
-	getAutoScalingGroup := func(autoScalingGroups *[]asgTypes.AutoScalingGroup, targetGroupArn *string) (*asgTypes.AutoScalingGroup, error) {
-		for _, autoScalingGroup := range *autoScalingGroups {
-			if Contains(&autoScalingGroup.TargetGroupARNs, targetGroupArn) {
-				return &autoScalingGroup, nil
-			}
-		}
-
-		return nil, errors.Errorf("InvalidTargetGroup: %s", *targetGroupArn)
-	}
-
-	ruleOutput, err := d.alb.DescribeRules(ctx, &alb.DescribeRulesInput{
-		RuleArns: []string{d.config.ListenerRuleArn},
-	})
+	blue, err := d.getDeployTarget(ctx, BlueTargetType, &d.config.Target.Blue)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
-	if len(ruleOutput.Rules) <= 0 {
-		return nil, errors.Errorf("MissingListenerRule: %s", d.config.ListenerRuleArn)
-	}
-
-	rule := &ruleOutput.Rules[0]
-	targetGroupArns := &[]string{d.config.Target.Blue.TargetGroupArn, d.config.Target.Green.TargetGroupArn}
-
-	idlingTargetGroup, err := getTargetGroup(rule, targetGroupArns, func(tg *albTypes.TargetGroupTuple) bool {
-		return *tg.Weight == int32(0)
-	})
+	green, err := d.getDeployTarget(ctx, GreenTargetType, &d.config.Target.Green)
 	if err != nil {
-		return nil, errors.WithMessage(err, "IdlingTargetGroupError")
+		return nil, err
 	}
 
-	runningTargetGroup, err := getTargetGroup(rule, targetGroupArns, func(tg *albTypes.TargetGroupTuple) bool {
-		return *tg.Weight != int32(0)
-	})
-	if err != nil {
-		return nil, errors.WithMessage(err, "RunningTargetGroupError")
+	if *blue.TargetGroup.Weight > int32(0) && *green.TargetGroup.Weight <= int32(0) {
+		return &DeployInfo{
+			IdlingTarget:  green,
+			RunningTarget: blue,
+		}, nil
+	} else if *green.TargetGroup.Weight > int32(0) && *blue.TargetGroup.Weight <= int32(0) {
+		return &DeployInfo{
+			IdlingTarget:  blue,
+			RunningTarget: green,
+		}, nil
+	} else {
+		return nil, errors.Errorf("Failed to identify idling and running target groups. Either two weighted TargetGroup must be 0")
 	}
-
-	asgOutput, err := d.asg.DescribeAutoScalingGroups(ctx, &asg.DescribeAutoScalingGroupsInput{
-		AutoScalingGroupNames: []string{d.config.Target.Blue.AutoScalingGroupName, d.config.Target.Green.AutoScalingGroupName},
-	})
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-
-	idlingAutoScalingGroup, err := getAutoScalingGroup(&asgOutput.AutoScalingGroups, idlingTargetGroup.TargetGroupArn)
-	if err != nil {
-		return nil, errors.WithMessage(err, "IdlingAutoScalingGroupError")
-	}
-
-	runningAutoScalingGroup, err := getAutoScalingGroup(&asgOutput.AutoScalingGroups, runningTargetGroup.TargetGroupArn)
-	if err != nil {
-		return nil, errors.WithMessage(err, "RunningAutoScalingGroupError")
-	}
-
-	blueOrGreen := func(targetGroupArn *string) TargetType {
-		switch *targetGroupArn {
-		case d.config.Target.Blue.TargetGroupArn:
-			return BlueTargetType
-		case d.config.Target.Green.TargetGroupArn:
-			return GreenTargetType
-		default:
-			return UnknownTargetType
-		}
-	}
-
-	return &DeployInfo{
-		IdlingTarget: &DeployTarget{
-			Type:             blueOrGreen(idlingTargetGroup.TargetGroupArn),
-			ListenerRule:     rule,
-			TargetGroup:      idlingTargetGroup,
-			AutoScalingGroup: idlingAutoScalingGroup,
-		},
-		RunningTarget: &DeployTarget{
-			Type:             blueOrGreen(runningTargetGroup.TargetGroupArn),
-			ListenerRule:     rule,
-			TargetGroup:      runningTargetGroup,
-			AutoScalingGroup: runningAutoScalingGroup,
-		},
-	}, nil
 }
 
 func (d *Deployer) Deploy(ctx context.Context, swap bool, beforeCleanup bool, afterCleanup bool, swapDuration *time.Duration) error {
@@ -469,7 +334,7 @@ func (d *Deployer) HealthCheck(ctx context.Context, targetGroupArn *string) erro
 }
 
 func (d *Deployer) UpdateTraffic(ctx context.Context, blueWeight *int32, greenWeight *int32) error {
-	d.logger.Info(fmt.Sprintf("Start update traffic. blue: %d%%, green: %d%%", *blueWeight, *greenWeight))
+	d.logger.Info(fmt.Sprintf("Start update traffic. blue->%d%%, green->%d%%", *blueWeight, *greenWeight))
 	_, err := d.alb.ModifyRule(ctx, &alb.ModifyRuleInput{
 		RuleArn: &d.config.ListenerRuleArn,
 		Actions: []albTypes.Action{

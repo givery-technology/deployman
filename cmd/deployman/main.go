@@ -18,8 +18,8 @@ var Version = "unset"
 
 var (
 	app     = kingpin.New("deployman", "A CLI for controlling ALB and two AutoScalingGroups and performing Blue/Green Deployment.")
-	config  = app.Flag("config", "Configuration filepath. By default, './deployman.json'").Default("./deployman.json").String()
-	verbose = app.Flag("verbose", "A detailed log containing call stacks will be output.").Default("false").Bool()
+	config  = app.Flag("config", "Configuration file path. This file is required.").Default("./deployman.json").String()
+	verbose = app.Flag("verbose", "A detailed log containing call stacks will be error messages.").Default("false").Bool()
 	version = app.Command("version", "Show current CLI version.")
 
 	bundle                 = app.Command("bundle", "Manage applicaiton bundles in S3 bucket.")
@@ -37,14 +37,17 @@ var (
 	ec2                  = app.Command("ec2", "Manage B/G deployment for EC2.")
 	ec2status            = ec2.Command("status", "Show current deployment status.")
 	ec2deploy            = ec2.Command("deploy", "Deploy a new application to an idling AutoScalingGroup.")
-	ec2deployNoConfirm   = ec2deploy.Flag("y", "Skip confirmation before process.").Default("false").Bool()
+	ec2deployNoConfirm   = ec2deploy.Flag("silent", "Skip confirmation before process.").Default("false").Bool()
 	ec2deployCleanup     = ec2deploy.Flag("cleanup", "Cleanup idling AutoScalingGroup's instances. Cleanup is done slowly by scale-in action.").Default("true").Bool()
-	ec2deploySwapTime    = ec2deploy.Flag("swap-time", "Time (in seconds) to swap traffic. Default is 0. e.g., if set to 60 seconds, it will keep both blue and green targets mixed without swapping immediately, and the older target will leave after 60 seconds.").Default("0").Duration()
+	ec2deploySwapTime    = ec2deploy.Flag("swap-time", "Time (in seconds) to swap traffic. Default is 0. e.g., if set to 60 seconds, it will keep both blue and green targets mixed without swapping immediately, and the older target will leave after 60 seconds.").Default("0s").Duration()
 	ec2rollback          = ec2.Command("rollback", "Restore the AutoScalingGroup to their original state, then swap traffic.")
-	ec2rollbackNoConfirm = ec2rollback.Flag("y", "Skip confirmation before process.").Default("false").Bool()
+	ec2rollbackNoConfirm = ec2rollback.Flag("silent", "Skip confirmation before process.").Default("false").Bool()
 
 	ec2cleanup                  = ec2.Command("cleanup", "Cleanup idling AutoScalingGroup's instances.")
 	ec2swap                     = ec2.Command("swap", "Swap traffic from a running AutoScalingGroup to an idling AutoScalingGroup.")
+	ec2updateTraffic            = ec2.Command("update-traffic", "Update traffic B/G TargetGroups.")
+	ec2updateTrafficBlueWeight  = ec2updateTraffic.Flag("blue", "Traffic weight for blue TargetGroup").Required().Int32()
+	ec2updateTrafficGreenWeight = ec2updateTraffic.Flag("green", "Traffic weight for green TargetGroup").Required().Int32()
 	ec2updateASG                = ec2.Command("update-autoscaling", "Update capacity of AutoScalingGroup.")
 	ec2updateASGName            = ec2updateASG.Flag("name", "Name of AutoScalingGroup").Required().String()
 	ec2updateASGDesired         = ec2updateASG.Flag("desired", "DesiredCapacity").Int32()
@@ -73,6 +76,11 @@ func main() {
 		logger.Fatal("🚨 Command Cancelled", nil)
 	}()
 
+	if command == version.FullCommand() {
+		fmt.Println("deployman", Version)
+		os.Exit(0)
+	}
+
 	awsDefaultRegion := internal.GetEnv(aws.String("AWS_REGION"), aws.String("ap-northeast-1"))
 	awsDefaultConfig, err := awsConfig.LoadDefaultConfig(ctx, awsConfig.WithRegion(awsDefaultRegion))
 	if err != nil {
@@ -88,10 +96,6 @@ func main() {
 	bundler := internal.NewBundler(&awsDefaultRegion, &awsDefaultConfig, deployConfig, logger)
 
 	switch command {
-	case version.FullCommand():
-		fmt.Println("deployman", Version)
-		os.Exit(0)
-
 	case bundleRegister.FullCommand():
 		if err = bundler.Register(ctx, bundleRegisterFilepath, bundleRegisterName); err != nil {
 			break
@@ -159,6 +163,9 @@ func main() {
 
 	case ec2swap.FullCommand():
 		err = deployer.SwapTraffic(ctx, aws.Duration(0))
+
+	case ec2updateTraffic.FullCommand():
+		err = deployer.UpdateTraffic(ctx, ec2updateTrafficBlueWeight, ec2updateTrafficGreenWeight)
 
 	case ec2updateASG.FullCommand():
 		_, err = deployer.UpdateAutoScalingGroup(ctx, ec2updateASGName, ec2updateASGDesired, ec2updateASGMinSize, ec2updateASGMaxSize, false)
