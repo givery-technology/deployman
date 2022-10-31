@@ -57,17 +57,17 @@ func All[T comparable](items *[]T, cond func(*T) bool) bool {
 	return true
 }
 
-func GetEnv(key *string, fallback *string) string {
-	if value, ok := os.LookupEnv(*key); ok {
+func GetEnv(key string, fallback string) string {
+	if value, ok := os.LookupEnv(key); ok {
 		return value
 	}
-	return *fallback
+	return fallback
 }
 
 func AskToContinue() bool {
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
-		fmt.Println("continue? (Y/n) >")
+		fmt.Print("continue? (Y/n) > ")
 		scanner.Scan()
 		input := scanner.Text()
 		switch input {

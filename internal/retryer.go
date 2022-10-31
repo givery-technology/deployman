@@ -20,10 +20,10 @@ type Retryer interface {
 
 type FixedIntervalRetryer struct {
 	maxLimit int
-	interval time.Duration
+	interval *time.Duration
 }
 
-func NewFixedIntervalRetryer(maxLimit int, interval time.Duration) *FixedIntervalRetryer {
+func NewFixedIntervalRetryer(maxLimit int, interval *time.Duration) *FixedIntervalRetryer {
 	return &FixedIntervalRetryer{
 		maxLimit: maxLimit,
 		interval: interval,
@@ -32,7 +32,7 @@ func NewFixedIntervalRetryer(maxLimit int, interval time.Duration) *FixedInterva
 
 func (r FixedIntervalRetryer) Start(hendler func(index int, interval *time.Duration) (RetryResult, error)) error {
 	for i := 0; i < r.maxLimit; i++ {
-		result, err := hendler(i, &r.interval)
+		result, err := hendler(i, r.interval)
 		if err != nil {
 			return errors.Wrapf(err, "RetryFailure")
 		}
@@ -41,7 +41,7 @@ func (r FixedIntervalRetryer) Start(hendler func(index int, interval *time.Durat
 			return nil
 		}
 
-		time.Sleep(r.interval)
+		time.Sleep(*r.interval)
 	}
 
 	return RetryTimeout

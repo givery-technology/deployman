@@ -9,16 +9,16 @@ import (
 )
 
 type Config struct {
-	BundleBucket    string      `json:"bundleBucket" validate:"required"`
-	ListenerRuleArn string      `json:"listenerRuleArn" validate:"required"`
-	Target          TargetSet   `json:"target" validate:"required"`
-	RetryPolicy     RetryPolicy `json:"retryPolicy" validate:"required"`
-	TimeZone        TimeZone    `json:"timeZone" validate:"required"`
+	BundleBucket    string       `json:"bundleBucket" validate:"required"`
+	ListenerRuleArn string       `json:"listenerRuleArn" validate:"required"`
+	Target          *TargetSet   `json:"target" validate:"required"`
+	RetryPolicy     *RetryPolicy `json:"retryPolicy" validate:"required"`
+	TimeZone        *TimeZone    `json:"timeZone" validate:"required"`
 }
 
 type TargetSet struct {
-	Blue  Target `json:"blue" validate:"required"`
-	Green Target `json:"green" validate:"required"`
+	Blue  *Target `json:"blue" validate:"required"`
+	Green *Target `json:"green" validate:"required"`
 }
 
 type Target struct {
@@ -46,19 +46,19 @@ func (t *TimeZone) GetLocation() *time.Location {
 	return location
 }
 
-func NewConfig(filename *string) (*Config, error) {
+func NewConfig(filename string) (*Config, error) {
 	config := &Config{
-		RetryPolicy: RetryPolicy{
+		RetryPolicy: &RetryPolicy{
 			MaxLimit:        360,
 			IntervalSeconds: 10,
 		},
-		TimeZone: TimeZone{
+		TimeZone: &TimeZone{
 			Location: "Asia/Tokyo",
 			Offset:   9 * 60 * 60,
 		},
 	}
 
-	raw, err := os.ReadFile(*filename)
+	raw, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, errors.Wrap(err, "ConfigReadError")
 	}

@@ -25,17 +25,17 @@ const (
 
 type Bundler struct {
 	s3     *s3.Client
-	region *string
+	region string
 	config *Config
 	logger Logger
 }
 
 type BundleInfo struct {
-	Value        *string
+	Value        string
 	LastModified *time.Time
 }
 
-func NewBundler(awsRegion *string, awsConfig *aws.Config, deployConfig *Config, logger Logger) *Bundler {
+func NewBundler(awsRegion string, awsConfig *aws.Config, deployConfig *Config, logger Logger) *Bundler {
 	return &Bundler{
 		region: awsRegion,
 		s3:     s3.NewFromConfig(*awsConfig),
@@ -44,9 +44,9 @@ func NewBundler(awsRegion *string, awsConfig *aws.Config, deployConfig *Config, 
 	}
 }
 
-func (b *Bundler) listBundles(ctx context.Context, bucket *string) (*[]s3Types.Object, error) {
+func (b *Bundler) listBundles(ctx context.Context, bucket string) (*[]s3Types.Object, error) {
 	output, err := b.s3.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
-		Bucket: bucket,
+		Bucket: &bucket,
 		Prefix: aws.String(BundlePrefix),
 	})
 	if err != nil {
@@ -83,7 +83,7 @@ func (b *Bundler) ListBundles(ctx context.Context) error {
 		return err
 	}
 
-	bundleObjects, err := b.listBundles(ctx, &b.config.BundleBucket)
+	bundleObjects, err := b.listBundles(ctx, b.config.BundleBucket)
 	if err != nil {
 		return err
 	}
@@ -91,10 +91,10 @@ func (b *Bundler) ListBundles(ctx context.Context) error {
 	var data [][]string
 	for i, bundleObject := range *bundleObjects {
 		var targets []string
-		if blueBundle != nil && strings.Contains(*bundleObject.Key, *blueBundle.Value) {
+		if blueBundle != nil && strings.Contains(*bundleObject.Key, blueBundle.Value) {
 			targets = append(targets, "blue")
 		}
-		if greenBundle != nil && strings.Contains(*bundleObject.Key, *greenBundle.Value) {
+		if greenBundle != nil && strings.Contains(*bundleObject.Key, greenBundle.Value) {
 			targets = append(targets, "green")
 		}
 		status := ""
@@ -119,7 +119,7 @@ func (b *Bundler) ListBundles(ctx context.Context) error {
 	return nil
 }
 
-func (b *Bundler) Register(ctx context.Context, uploadFile *string, bundleName *string) error {
+func (b *Bundler) Register(ctx context.Context, uploadFile string, bundleName string) error {
 	createBucketIfNotExsists := func() error {
 		_, err := b.s3.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: &b.config.BundleBucket})
 		var apiErr smithy.APIError
@@ -128,7 +128,7 @@ func (b *Bundler) Register(ctx context.Context, uploadFile *string, bundleName *
 				_, err := b.s3.CreateBucket(ctx, &s3.CreateBucketInput{
 					Bucket: &b.config.BundleBucket,
 					CreateBucketConfiguration: &s3Types.CreateBucketConfiguration{
-						LocationConstraint: s3Types.BucketLocationConstraint(*b.region),
+						LocationConstraint: s3Types.BucketLocationConstraint(b.region),
 					},
 				})
 				if err != nil {
@@ -172,14 +172,14 @@ func (b *Bundler) Register(ctx context.Context, uploadFile *string, bundleName *
 	}
 
 	removeOldBundlesIfNeed := func() error {
-		objects, err := b.listBundles(ctx, &b.config.BundleBucket)
+		objects, err := b.listBundles(ctx, b.config.BundleBucket)
 		if err != nil {
 			return err
 		}
 		for i, o := range *objects {
 			if i >= MaxKeepBundles-1 {
 				_, err := b.s3.DeleteObject(ctx, &s3.DeleteObjectInput{
-					Bucket: aws.String(b.config.BundleBucket),
+					Bucket: &b.config.BundleBucket,
 					Key:    o.Key,
 				})
 				if err != nil {
@@ -199,14 +199,14 @@ func (b *Bundler) Register(ctx context.Context, uploadFile *string, bundleName *
 		return err
 	}
 
-	file, err := os.Open(*uploadFile)
+	file, err := os.Open(uploadFile)
 	if err != nil {
 		return errors.WithStack(err)
 	}
 
 	_, err = b.s3.PutObject(ctx, &s3.PutObjectInput{
-		Bucket: aws.String(b.config.BundleBucket),
-		Key:    aws.String(BundlePrefix + *bundleName),
+		Bucket: &b.config.BundleBucket,
+		Key:    aws.String(BundlePrefix + bundleName),
 		Body:   file,
 	})
 	if err != nil {
@@ -218,7 +218,7 @@ func (b *Bundler) Register(ctx context.Context, uploadFile *string, bundleName *
 
 func (b *Bundler) getActiveBundle(ctx context.Context, targetType TargetType) (*BundleInfo, error) {
 	output, err := b.s3.GetObject(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(b.config.BundleBucket),
+		Bucket: &b.config.BundleBucket,
 		Key:    aws.String(ActiveBundleKeyPrefix + string(targetType)),
 	})
 	if err != nil {
@@ -232,7 +232,7 @@ func (b *Bundler) getActiveBundle(ctx context.Context, targetType TargetType) (*
 	}
 
 	return &BundleInfo{
-		Value:        aws.String(buf.String()),
+		Value:        buf.String(),
 		LastModified: output.LastModified,
 	}, nil
 }
@@ -241,8 +241,8 @@ func (b *Bundler) Activate(ctx context.Context, targetType TargetType, bundleVal
 	key := ActiveBundleKeyPrefix + string(targetType)
 	b.logger.Info(fmt.Sprintf("'%s' registered in 's3://%s/%s'", *bundleValue, b.config.BundleBucket, key))
 	_, err := b.s3.PutObject(ctx, &s3.PutObjectInput{
-		Bucket:      aws.String(b.config.BundleBucket),
-		Key:         aws.String(key),
+		Bucket:      &b.config.BundleBucket,
+		Key:         &key,
 		ContentType: aws.String("text/plain"),
 		Body:        strings.NewReader(*bundleValue),
 	})
@@ -261,7 +261,7 @@ func (b *Bundler) Download(ctx context.Context, targetType TargetType) error {
 
 	output, err := b.s3.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: &b.config.BundleBucket,
-		Key:    aws.String(BundlePrefix + *bundle.Value),
+		Key:    aws.String(BundlePrefix + bundle.Value),
 	})
 	if err != nil {
 		return errors.WithStack(err)
@@ -273,7 +273,7 @@ func (b *Bundler) Download(ctx context.Context, targetType TargetType) error {
 		return errors.WithStack(err)
 	}
 
-	err = os.WriteFile(*bundle.Value, buf.Bytes(), 0755)
+	err = os.WriteFile(bundle.Value, buf.Bytes(), 0755)
 	if err != nil {
 		return errors.WithStack(err)
 	}
