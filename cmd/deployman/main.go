@@ -54,7 +54,7 @@ var (
 	ec2autoscalingDesired       = ec2autoscaling.Flag("desired", "DesiredCapacity").Default("-1").Int32()
 	ec2autoscalingMinSize       = ec2autoscaling.Flag("min", "MinSize").Default("-1").Int32()
 	ec2autoscalingMaxSize       = ec2autoscaling.Flag("max", "MaxSize").Default("-1").Int32()
-	ec2moveScheduledActions     = ec2.Command("move-schaduled-actions", "Move ScheduledActions of AutoScalingGroup.")
+	ec2moveScheduledActions     = ec2.Command("move-scheduled-actions", "Move ScheduledActions of AutoScalingGroup.")
 	ec2moveScheduledActionsFrom = ec2moveScheduledActions.Flag("from", "Name of AutoScalingGroup").Required().String()
 	ec2moveScheduledActionsTo   = ec2moveScheduledActions.Flag("to", "Name of AutoScalingGroup").Required().String()
 )

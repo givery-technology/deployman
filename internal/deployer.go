@@ -595,6 +595,7 @@ func (d *Deployer) MoveScheduledActions(ctx context.Context, fromAutoScalingGrou
 			d.logger.Warn("Failed to delete ScheduledActions, but processing continues."+msg, err)
 			continue
 		}
+		d.logger.Info(fmt.Sprintf("ScheduledActions:'%s' moved successfully.", *from.ScheduledActionName))
 	}
 
 	return nil
