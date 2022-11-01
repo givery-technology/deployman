@@ -12,8 +12,18 @@ This CLI enables B/G deployments by manipulating ALB weighted target groups to c
 
     ![./conceptual.png](./conceptual.png)
 
+- NOTES: This CLI could be applied to Canary deployments as well, as it provides fine-grained control over ALB-weighted target groups.
+
 ### About bundle management
-This CLI has the ability to register and search for the respective application bundles in blue or green to achieve the above deployment.
+This CLI has the ability to register and search for the respective application bundles in blue or green to achieve the above deployment. Bundles will be managed in S3 and configured as follows.
+
+- S3 bucket/
+    - bundles/
+        - xxxxxxxxx.zip
+        - yyyyyyyyy.zip
+        - zzzzzzzzz.zip
+    - active_bundle_blue: Application bundle file for deployment in blue environment
+    - active_bundle_green: Application bundle file for deployment in green environment 
 
 # Install
 There are the following methods.
