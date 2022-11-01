@@ -22,8 +22,8 @@ This CLI has the ability to register and search for the respective application b
         - xxxxxxxxx.zip
         - yyyyyyyyy.zip
         - zzzzzzzzz.zip
-    - active_bundle_blue: Application bundle file for deployment in blue environment
-    - active_bundle_green: Application bundle file for deployment in green environment 
+    - active_bundle_blue: Text file pointing to the application bundle file name for deployment in blue environment
+    - active_bundle_green: Text file pointing to the application bundle file name for deployment in green environment 
 
 # Install
 There are the following methods.
