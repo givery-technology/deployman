@@ -11,6 +11,7 @@ import (
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -114,6 +115,26 @@ func (d *Deployer) getHealthInfo(ctx context.Context, targetGroupArn string) (*H
 		InitialCount:   countBy(albTypes.TargetHealthStateEnumInitial),
 		DrainingCount:  countBy(albTypes.TargetHealthStateEnumDraining),
 	}, nil
+}
+
+func (d *Deployer) getLifecycleStates(autoScalingGroup *asgTypes.AutoScalingGroup) string {
+	lifecycleStates := map[asgTypes.LifecycleState]int{}
+	for _, ins := range autoScalingGroup.Instances {
+		if _, ok := lifecycleStates[ins.LifecycleState]; ok {
+			lifecycleStates[ins.LifecycleState]++
+		} else {
+			lifecycleStates[ins.LifecycleState] = 1
+		}
+	}
+	var states []string
+	for k, v := range lifecycleStates {
+		states = append(states, fmt.Sprintf("%s:%d", string(k), v))
+	}
+	state := ""
+	if len(states) > 0 {
+		state = strings.Join(states, ",")
+	}
+	return state
 }
 
 func (d *Deployer) GetDeployTarget(ctx context.Context, targetType TargetType) (*DeployTarget, error) {
@@ -223,19 +244,20 @@ func (d *Deployer) ShowStatus(ctx context.Context, info *DeployInfo) error {
 
 	toData := func(target *DeployTarget, targetGroupName string, health *HealthInfo) []string {
 		return []string{
-			fmt.Sprint(target.Type),
-			fmt.Sprint(*target.TargetGroup.Weight),
-			fmt.Sprint(*target.AutoScalingGroup.AutoScalingGroupName),
-			fmt.Sprint(*target.AutoScalingGroup.DesiredCapacity),
-			fmt.Sprint(*target.AutoScalingGroup.MinSize),
-			fmt.Sprint(*target.AutoScalingGroup.MaxSize),
-			fmt.Sprint(targetGroupName),
-			fmt.Sprint(health.TotalCount),
-			fmt.Sprint(health.HealthyCount),
-			fmt.Sprint(health.UnhealthyCount),
-			fmt.Sprint(health.UnusedCount),
-			fmt.Sprint(health.InitialCount),
-			fmt.Sprint(health.DrainingCount),
+			string(target.Type),
+			strconv.Itoa(int(*target.TargetGroup.Weight)),
+			*target.AutoScalingGroup.AutoScalingGroupName,
+			strconv.Itoa(int(*target.AutoScalingGroup.DesiredCapacity)),
+			strconv.Itoa(int(*target.AutoScalingGroup.MinSize)),
+			strconv.Itoa(int(*target.AutoScalingGroup.MaxSize)),
+			d.getLifecycleStates(target.AutoScalingGroup),
+			targetGroupName,
+			strconv.Itoa(health.TotalCount),
+			strconv.Itoa(health.HealthyCount),
+			strconv.Itoa(health.UnhealthyCount),
+			strconv.Itoa(health.UnusedCount),
+			strconv.Itoa(health.InitialCount),
+			strconv.Itoa(health.DrainingCount),
 		}
 	}
 
@@ -248,6 +270,7 @@ func (d *Deployer) ShowStatus(ctx context.Context, info *DeployInfo) error {
 		"asg:desired",
 		"asg:min",
 		"asg:max",
+		"asg:lifecycle",
 		"elb:tgname",
 		"elb:total",
 		"elb:healthy",
@@ -527,30 +550,13 @@ func (d *Deployer) CleanupAutoScalingGroup(ctx context.Context, autoScalingGroup
 				return FinishRetry, nil
 			}
 
-			lifecycleStates := map[asgTypes.LifecycleState]int{}
-			for _, ins := range current.Instances {
-				if _, ok := lifecycleStates[ins.LifecycleState]; ok {
-					lifecycleStates[ins.LifecycleState]++
-				} else {
-					lifecycleStates[ins.LifecycleState] = 1
-				}
-			}
-			var states []string
-			for k, v := range lifecycleStates {
-				states = append(states, fmt.Sprintf("%s:%d", string(k), v))
-			}
-			state := ""
-			if len(states) > 0 {
-				state = strings.Join(states, ",")
-			}
-
 			d.logger.Info(fmt.Sprintf("Cleanup ASG:'%s', desired:%d, min:%d, max:%d, instances:%d, lifecycle:{%s}",
 				*autoScalingGroup.AutoScalingGroupName,
 				*current.DesiredCapacity,
 				*current.MinSize,
 				*current.MaxSize,
 				len(current.Instances),
-				state,
+				d.getLifecycleStates(&current),
 			))
 
 			return ContinueRetry, nil

@@ -16,45 +16,57 @@ var Version = "unset"
 
 var (
 	app     = kingpin.New("deployman", "A CLI for controlling ALB and two AutoScalingGroups and performing Blue/Green Deployment.")
-	config  = app.Flag("config", "Configuration file path. This file is required.").Default("./deployman.json").String()
-	verbose = app.Flag("verbose", "A detailed log containing call stacks will be error messages.").Default("false").Bool()
+	config  = app.Flag("config", "[OPTIONAL] Configuration file path. By default, this value is './deployman.json'. If this file does not exist, an error will occur.").Default("./deployman.json").String()
+	verbose = app.Flag("verbose", "[OPTIONAL] A detailed log containing call stacks will be error messages.").Bool()
+
 	version = app.Command("version", "Show current CLI version.")
 
-	bundle                 = app.Command("bundle", "Manage applicaiton bundles in S3 bucket.")
-	bundleRegister         = bundle.Command("register", "Register new application bundle. By default, register bundles associated with idle AutoScalingGroups.")
-	bundleRegisterFilepath = bundleRegister.Flag("file", "File path").Required().String()
-	bundleRegisterName     = bundleRegister.Flag("name", "Name of bundle to be registered").Required().String()
-	bundleRegisterActivate = bundleRegister.Flag("with-activate", "To active a registered bundles.").Bool()
-	bundleList             = bundle.Command("list", "List registered application bundles.")
-	bundleActivate         = bundle.Command("activate", "Activate one of the registered bundles. The active bundle will be used for the next deployment or scale-out.")
-	bundleActivateTarget   = bundleActivate.Flag("target", "Target type for bundle. Valid values are either 'blue' or 'green'").Enum("blue", "green")
-	bundleActivateValue    = bundleActivate.Flag("value", "Value of bundle to active").Required().String()
-	bundleDownload         = bundle.Command("download", "Download application bundle file.")
-	bundleDownloadTarget   = bundleDownload.Flag("target", "Target type for bundle. Valid values are either 'blue' or 'green'").Enum("blue", "green")
+	bundle = app.Command("bundle", "")
 
-	ec2                 = app.Command("ec2", "Manage B/G deployment for EC2.")
-	ec2status           = ec2.Command("status", "Show current deployment status.")
-	ec2deploy           = ec2.Command("deploy", "Deploy a new application to an idling AutoScalingGroup.")
-	ec2deploySilent     = ec2deploy.Flag("silent", "Skip confirmation before process.").Default("false").Bool()
-	ec2deployCleanup    = ec2deploy.Flag("cleanup", "Cleanup idling AutoScalingGroup's instances. Cleanup is done slowly by scale-in action.").Default("true").Bool()
-	ec2deployDuration   = ec2deploy.Flag("duration", "Time to swap traffic. Default is '0s'. e.g., if set to '60s', it will keep both blue and green targets mixed (50:50) without swapping immediately, and the older target will leave after 60 seconds.").Default("0s").Duration()
-	ec2rollback         = ec2.Command("rollback", "Restore the AutoScalingGroup to their original state, then swap traffic.")
-	ec2rollbackSilent   = ec2rollback.Flag("silent", "Skip confirmation before process.").Default("false").Bool()
-	ec2rollbackCleanup  = ec2rollback.Flag("cleanup", "Cleanup idling AutoScalingGroup's instances. Cleanup is done slowly by scale-in action.").Default("true").Bool()
-	ec2rollbackDuration = ec2rollback.Flag("duration", "Time to swap traffic. Default is '0s'. e.g., if set to '60s', it will keep both blue and green targets mixed (50:50) without swapping immediately, and the older target will leave after 60 seconds.").Default("0s").Duration()
+	bundleRegister         = bundle.Command("register", "Register a new application bundle with any name, specifying the local file path to S3 bucket.")
+	bundleRegisterFilepath = bundleRegister.Flag("file", "[REQUIRED] File name and path in local").Required().String()
+	bundleRegisterName     = bundleRegister.Flag("name", "[REQUIRED] Name of bundle to be registered").Required().String()
+	bundleRegisterActivate = bundleRegister.Flag("with-activate", "[OPTIONAL] Associate (activate) this bundle with an idle AutoScalingGroup.").Bool()
 
-	ec2cleanup                  = ec2.Command("cleanup", "Cleanup idling AutoScalingGroup's instances.")
-	ec2swap                     = ec2.Command("swap", "Swap traffic from a running AutoScalingGroup to an idling AutoScalingGroup.")
-	ec2swapDuration             = ec2swap.Flag("duration", "Time to swap traffic. Default is '0s'. e.g., if set to '60s', it will keep both blue and green targets mixed (50:50) without swapping immediately, and the older target will leave after 60 seconds.").Default("0s").Duration()
-	ec2traffic                  = ec2.Command("traffic", "Update traffic B/G TargetGroups.")
-	ec2trafficBlueWeight        = ec2traffic.Flag("blue", "Traffic weight for blue TargetGroup").Required().Int32()
-	ec2trafficGreenWeight       = ec2traffic.Flag("green", "Traffic weight for green TargetGroup").Required().Int32()
-	ec2autoscaling              = ec2.Command("autoscaling", "Update capacity of AutoScalingGroup.")
-	ec2autoscalingTarget        = ec2autoscaling.Flag("target", "Name of AutoScalingGroup").Required().Enum("blue", "green")
-	ec2autoscalingDesired       = ec2autoscaling.Flag("desired", "DesiredCapacity").Default("-1").Int32()
-	ec2autoscalingMinSize       = ec2autoscaling.Flag("min", "MinSize").Default("-1").Int32()
-	ec2autoscalingMaxSize       = ec2autoscaling.Flag("max", "MaxSize").Default("-1").Int32()
-	ec2moveScheduledActions     = ec2.Command("move-scheduled-actions", "Move ScheduledActions of AutoScalingGroup.")
+	bundleList = bundle.Command("list", "List registered application bundles.")
+
+	bundleActivate       = bundle.Command("activate", "Activate one of the registered bundles. The active bundle will be used for the next deployment or scale-out.")
+	bundleActivateTarget = bundleActivate.Flag("target", "[REQUIRED] Target type for bundle. Valid values are either 'blue' or 'green'. The 'ec2 status' command allows you to check the target details.").Required().Enum("blue", "green")
+	bundleActivateName   = bundleActivate.Flag("name", "[REQUIRED] Bundle Name. Valid names can be checked with the 'bundle list' command.").Required().String()
+
+	bundleDownload       = bundle.Command("download", "Download application bundle file.")
+	bundleDownloadTarget = bundleDownload.Flag("target", "[REQUIRED] Target type for bundle. Valid values are either 'blue' or 'green'. The 'ec2 status' command allows you to check the target details.").Required().Enum("blue", "green")
+
+	ec2 = app.Command("ec2", "")
+
+	ec2status = ec2.Command("status", "Show current deployment status.")
+
+	ec2deploy          = ec2.Command("deploy", "Deploy a new application to an idling AutoScalingGroup.")
+	ec2deploySilent    = ec2deploy.Flag("silent", "[OPTIONAL] Skip confirmation before process.").Bool()
+	ec2deployNoCleanup = ec2deploy.Flag("no-cleanup", "[OPTIONAL] Skip cleanup of idle old AutoScalingGroups that are no longer needed after deployment.").Bool()
+	ec2deploySwapTime  = ec2deploy.Flag("duration", "[OPTIONAL] Time to wait until traffic is completely swapped. Default is '0s'. If this value is set to '60s', the B/G traffic is distributed 50:50 and waits for 60 seconds. After that, the B/G traffic will be completely swapped.").Default("0s").Duration()
+
+	ec2rollback          = ec2.Command("rollback", "Restore the AutoScalingGroup to their original state, then swap traffic.")
+	ec2rollbackSilent    = ec2rollback.Flag("silent", "[OPTIONAL] Skip confirmation before process.").Bool()
+	ec2rollbackNoCleanup = ec2rollback.Flag("cleanup", "[OPTIONAL] Skip cleanup of idle old AutoScalingGroups that are no longer needed after deployment.").Bool()
+	ec2rollbackSwapTime  = ec2rollback.Flag("duration", "[OPTIONAL] Time to wait until traffic is completely swapped. Default is '0s'. If this value is set to '60s', the B/G traffic is distributed 50:50 and waits for 60 seconds. After that, the B/G traffic will be completely swapped.").Default("0s").Duration()
+
+	ec2cleanup = ec2.Command("cleanup", "Terminate all instances that are idle, i.e., in an AutoScalingGroup with a traffic weight of 0. You can check the current status with the 'ec2 status' command.")
+
+	ec2swap         = ec2.Command("swap", "B/G Swap the current traffic of the respective 2 AutoScalingGroups. You can check the current status with the 'ec2 status' command.")
+	ec2swapDuration = ec2swap.Flag("duration", "[OPTIONAL] Time to wait until traffic is completely swapped. Default is '0s'. If this value is set to '60s', the B/G traffic is distributed 50:50 and waits for 60 seconds. After that, the B/G traffic will be completely swapped.").Default("0s").Duration()
+
+	ec2traffic            = ec2.Command("traffic", "Update the traffic of the respective target group of B/G to any value. You can check the current status with the 'ec2 status' command.")
+	ec2trafficBlueWeight  = ec2traffic.Flag("blue", "Traffic weight for blue TargetGroup").Required().Int32()
+	ec2trafficGreenWeight = ec2traffic.Flag("green", "Traffic weight for green TargetGroup").Required().Int32()
+
+	ec2autoscaling        = ec2.Command("autoscaling", "Update the capacity of any AutoScalingGroup.")
+	ec2autoscalingTarget  = ec2autoscaling.Flag("target", "Target type of AutoScalingGroup. Valid values are either 'blue' or 'green'. The 'ec2 status' command allows you to check the target details.").Required().Enum("blue", "green")
+	ec2autoscalingDesired = ec2autoscaling.Flag("desired", "DesiredCapacity").Default("-1").Int32()
+	ec2autoscalingMinSize = ec2autoscaling.Flag("min", "MinSize").Default("-1").Int32()
+	ec2autoscalingMaxSize = ec2autoscaling.Flag("max", "MaxSize").Default("-1").Int32()
+
+	ec2moveScheduledActions     = ec2.Command("move-scheduled-actions", "Move ScheduledActions that exist in any AutoScalingGroup to another AutoScalingGroup.")
 	ec2moveScheduledActionsFrom = ec2moveScheduledActions.Flag("from", "Name of AutoScalingGroup").Required().String()
 	ec2moveScheduledActionsTo   = ec2moveScheduledActions.Flag("to", "Name of AutoScalingGroup").Required().String()
 )
@@ -113,7 +125,7 @@ func main() {
 		err = bundler.ListBundles(ctx)
 
 	case bundleActivate.FullCommand():
-		err = bundler.Activate(ctx, internal.TargetType(*bundleActivateTarget), bundleActivateValue)
+		err = bundler.Activate(ctx, internal.TargetType(*bundleActivateTarget), bundleActivateName)
 
 	case bundleDownload.FullCommand():
 		err = bundler.Download(ctx, internal.TargetType(*bundleDownloadTarget))
@@ -125,13 +137,13 @@ func main() {
 		if *ec2deploySilent == false && internal.AskToContinue() == false {
 			logger.Fatal("🚨 Command Cancelled", nil)
 		}
-		err = deployer.Deploy(ctx, true, true, *ec2deployCleanup, ec2deployDuration)
+		err = deployer.Deploy(ctx, true, true, !*ec2deployNoCleanup, ec2deploySwapTime)
 
 	case ec2rollback.FullCommand():
 		if *ec2rollbackSilent == false && internal.AskToContinue() == false {
 			logger.Fatal("🚨 Command Cancelled", nil)
 		}
-		err = deployer.Deploy(ctx, true, false, *ec2rollbackCleanup, ec2rollbackDuration)
+		err = deployer.Deploy(ctx, true, false, !*ec2rollbackNoCleanup, ec2rollbackSwapTime)
 
 	case ec2cleanup.FullCommand():
 		info, err := deployer.GetDeployInfo(ctx)
