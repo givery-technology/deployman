@@ -1,5 +1,5 @@
 # Deployman
-A CLI for controlling ALB and 2 AutoScalingGroups and performing Blue/Green Deployment.
+CLI to control and deploy ALB and two AutoScalingGroups. A similar solution is CodeDeploy. However, it does not maintain a blue/green environment. Basically CodeDeploy tries to replicate one AutoScalingGroup and remove the old one, which is difficult to manage infrastructure with Terraform or any other IaC. It also does not allow for fine-grained control of traffic through ALB weighted target groups. This CLI was created to solve those problems.
 
 # How it works
 ### About deployment
@@ -50,7 +50,7 @@ cd ./cmd/deployman && go build
     }
     ```
 
-# usage
+# Usage
 ### commands
 ```shell
 usage: deployman [<flags>] <command> [<args> ...]
