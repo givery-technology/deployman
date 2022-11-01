@@ -17,9 +17,8 @@ import (
 )
 
 const (
-	BlueTargetType    TargetType = "blue"
-	GreenTargetType   TargetType = "green"
-	UnknownTargetType TargetType = "unknown"
+	BlueTargetType  TargetType = "blue"
+	GreenTargetType TargetType = "green"
 
 	ProcessSkipped   ProcessResult = false
 	ProcessCompleted ProcessResult = true
@@ -92,6 +91,14 @@ func NewDeployer(awsRegion string, awsConfig *aws.Config, deployConfig *Config, 
 //	return nil
 //}
 
+func (d *Deployer) getListenerRule(ctx context.Context) (*albTypes.Rule, error) {
+	output, err := d.alb.DescribeRules(ctx, &alb.DescribeRulesInput{RuleArns: []string{d.config.ListenerRuleArn}})
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	return &output.Rules[0], nil
+}
+
 func (d *Deployer) getHealthInfo(ctx context.Context, targetGroupArn string) (*HealthInfo, error) {
 	health, err := d.alb.DescribeTargetHealth(ctx, &alb.DescribeTargetHealthInput{
 		TargetGroupArn: &targetGroupArn,
@@ -117,7 +124,7 @@ func (d *Deployer) getHealthInfo(ctx context.Context, targetGroupArn string) (*H
 	}, nil
 }
 
-func (d *Deployer) getLifecycleStates(autoScalingGroup *asgTypes.AutoScalingGroup) string {
+func (d *Deployer) lifecycleStateToString(autoScalingGroup *asgTypes.AutoScalingGroup) string {
 	lifecycleStates := map[asgTypes.LifecycleState]int{}
 	for _, ins := range autoScalingGroup.Instances {
 		if _, ok := lifecycleStates[ins.LifecycleState]; ok {
@@ -137,7 +144,9 @@ func (d *Deployer) getLifecycleStates(autoScalingGroup *asgTypes.AutoScalingGrou
 	return state
 }
 
-func (d *Deployer) GetDeployTarget(ctx context.Context, targetType TargetType) (*DeployTarget, error) {
+func (d *Deployer) GetDeployTarget(
+	ctx context.Context, rule *albTypes.Rule, targetType TargetType) (*DeployTarget, error) {
+
 	var target *Target
 	if targetType == BlueTargetType {
 		target = d.config.Target.Blue
@@ -147,14 +156,8 @@ func (d *Deployer) GetDeployTarget(ctx context.Context, targetType TargetType) (
 		return nil, errors.Errorf("TargetType:'%s' does not exist.", string(targetType))
 	}
 
-	ruleOutput, err := d.alb.DescribeRules(ctx, &alb.DescribeRulesInput{RuleArns: []string{d.config.ListenerRuleArn}})
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-	listenerRule := ruleOutput.Rules[0]
-
 	var targetGroupTuple *albTypes.TargetGroupTuple
-	for _, action := range listenerRule.Actions {
+	for _, action := range rule.Actions {
 		if action.Type == albTypes.ActionTypeEnumForward {
 			for _, tg := range action.ForwardConfig.TargetGroups {
 				if *tg.TargetGroupArn == target.TargetGroupArn {
@@ -165,7 +168,7 @@ func (d *Deployer) GetDeployTarget(ctx context.Context, targetType TargetType) (
 		}
 	}
 
-	asgOutput, err := d.asg.DescribeAutoScalingGroups(ctx, &asg.DescribeAutoScalingGroupsInput{
+	output, err := d.asg.DescribeAutoScalingGroups(ctx, &asg.DescribeAutoScalingGroupsInput{
 		AutoScalingGroupNames: []string{target.AutoScalingGroupName},
 	})
 	if err != nil {
@@ -173,42 +176,58 @@ func (d *Deployer) GetDeployTarget(ctx context.Context, targetType TargetType) (
 	}
 
 	if targetGroupTuple == nil {
-		return &DeployTarget{
-			Type: UnknownTargetType,
-			TargetGroup: &albTypes.TargetGroupTuple{
-				TargetGroupArn: aws.String("missing"),
-				Weight:         aws.Int32(0),
-			},
-			AutoScalingGroup: &asgOutput.AutoScalingGroups[0],
+		return nil, errors.Errorf("TargetGroup does not exist. TargetType:'%s'", string(targetType))
+	}
+
+	return &DeployTarget{
+		Type:             targetType,
+		TargetGroup:      targetGroupTuple,
+		AutoScalingGroup: &output.AutoScalingGroups[0],
+	}, nil
+}
+
+func (d *Deployer) GetDeployInfo(ctx context.Context) (*DeployInfo, error) {
+	rule, err := d.getListenerRule(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	blue, err := d.GetDeployTarget(ctx, rule, BlueTargetType)
+	if err != nil {
+		return nil, err
+	}
+
+	green, err := d.GetDeployTarget(ctx, rule, GreenTargetType)
+	if err != nil {
+		return nil, err
+	}
+
+	if *blue.TargetGroup.Weight > int32(0) && *green.TargetGroup.Weight <= int32(0) {
+		return &DeployInfo{
+			IdlingTarget:  green,
+			RunningTarget: blue,
+		}, nil
+	} else if *green.TargetGroup.Weight > int32(0) && *blue.TargetGroup.Weight <= int32(0) {
+		return &DeployInfo{
+			IdlingTarget:  blue,
+			RunningTarget: green,
 		}, nil
 	} else {
-		return &DeployTarget{
-			Type:             targetType,
-			TargetGroup:      targetGroupTuple,
-			AutoScalingGroup: &asgOutput.AutoScalingGroups[0],
-		}, nil
+		return nil, errors.Errorf("Failed to identify idling and running target groups. Either two weighted TargetGroup must be 0")
 	}
 }
 
-func (d *Deployer) ShowStatus(ctx context.Context, info *DeployInfo) error {
+func (d *Deployer) ShowStatus(ctx context.Context) error {
 	//DeployTarget
-	decideDeployTarget := func(ctx context.Context, targetType TargetType) (*DeployTarget, error) {
-		if info != nil {
-			if info.IdlingTarget.Type == targetType {
-				return info.IdlingTarget, nil
-			} else if info.RunningTarget.Type == targetType {
-				return info.RunningTarget, nil
-			} else {
-				return nil, errors.Errorf("TargetType:'%s' does not exist in DeployInfo", string(targetType))
-			}
-		}
-		return d.GetDeployTarget(ctx, targetType)
-	}
-	blueTarget, err := decideDeployTarget(ctx, BlueTargetType)
+	rule, err := d.getListenerRule(ctx)
 	if err != nil {
 		return err
 	}
-	greenTarget, err := decideDeployTarget(ctx, GreenTargetType)
+	blueTarget, err := d.GetDeployTarget(ctx, rule, BlueTargetType)
+	if err != nil {
+		return err
+	}
+	greenTarget, err := d.GetDeployTarget(ctx, rule, GreenTargetType)
 	if err != nil {
 		return err
 	}
@@ -219,7 +238,7 @@ func (d *Deployer) ShowStatus(ctx context.Context, info *DeployInfo) error {
 			TargetGroupArns: []string{targetGroupArn},
 		})
 		if err != nil {
-			return "", err
+			return "", errors.WithStack(err)
 		}
 		return *output.TargetGroups[0].TargetGroupName, nil
 	}
@@ -250,7 +269,7 @@ func (d *Deployer) ShowStatus(ctx context.Context, info *DeployInfo) error {
 			strconv.Itoa(int(*target.AutoScalingGroup.DesiredCapacity)),
 			strconv.Itoa(int(*target.AutoScalingGroup.MinSize)),
 			strconv.Itoa(int(*target.AutoScalingGroup.MaxSize)),
-			d.getLifecycleStates(target.AutoScalingGroup),
+			d.lifecycleStateToString(target.AutoScalingGroup),
 			targetGroupName,
 			strconv.Itoa(health.TotalCount),
 			strconv.Itoa(health.HealthyCount),
@@ -284,38 +303,6 @@ func (d *Deployer) ShowStatus(ctx context.Context, info *DeployInfo) error {
 	return nil
 }
 
-func (d *Deployer) GetDeployInfo(ctx context.Context) (*DeployInfo, error) {
-	blue, err := d.GetDeployTarget(ctx, BlueTargetType)
-	if err != nil {
-		return nil, err
-	}
-	if blue.Type == UnknownTargetType {
-		return nil, errors.Errorf("Blue Target is not found")
-	}
-
-	green, err := d.GetDeployTarget(ctx, GreenTargetType)
-	if err != nil {
-		return nil, err
-	}
-	if green.Type == UnknownTargetType {
-		return nil, errors.Errorf("Green Target is not found")
-	}
-
-	if *blue.TargetGroup.Weight > int32(0) && *green.TargetGroup.Weight <= int32(0) {
-		return &DeployInfo{
-			IdlingTarget:  green,
-			RunningTarget: blue,
-		}, nil
-	} else if *green.TargetGroup.Weight > int32(0) && *blue.TargetGroup.Weight <= int32(0) {
-		return &DeployInfo{
-			IdlingTarget:  blue,
-			RunningTarget: green,
-		}, nil
-	} else {
-		return nil, errors.Errorf("Failed to identify idling and running target groups. Either two weighted TargetGroup must be 0")
-	}
-}
-
 func (d *Deployer) Deploy(
 	ctx context.Context, swap bool, cleanupBeforeDeploy bool, cleanupAfterDeploy bool, swapDuration *time.Duration) error {
 
@@ -325,7 +312,7 @@ func (d *Deployer) Deploy(
 	}
 
 	d.logger.Info("Show current status.")
-	if err := d.ShowStatus(ctx, info); err != nil {
+	if err := d.ShowStatus(ctx); err != nil {
 		return err
 	}
 
@@ -337,7 +324,7 @@ func (d *Deployer) Deploy(
 
 		if cleanupResult == ProcessCompleted {
 			d.logger.Info("Cleanup completed.")
-			if err := d.ShowStatus(ctx, nil); err != nil {
+			if err := d.ShowStatus(ctx); err != nil {
 				return err
 			}
 		}
@@ -375,7 +362,7 @@ func (d *Deployer) Deploy(
 	}
 
 	d.logger.Info("Health check completed.")
-	if err := d.ShowStatus(ctx, nil); err != nil {
+	if err := d.ShowStatus(ctx); err != nil {
 		return err
 	}
 
@@ -386,7 +373,7 @@ func (d *Deployer) Deploy(
 		}
 
 		d.logger.Info("Traffic update completed.")
-		if err := d.ShowStatus(ctx, nil); err != nil {
+		if err := d.ShowStatus(ctx); err != nil {
 			return err
 		}
 	}
@@ -398,7 +385,8 @@ func (d *Deployer) Deploy(
 		}
 
 		d.logger.Info(fmt.Sprintf(
-			"Update '%s' target MinSize to 0 to clean up instances that are no longer needed. The automatic scale-in will clean up slowly.", info.RunningTarget.Type))
+			"Update '%s' target MinSize to 0 to clean up instances that are no longer needed. The automatic scale-in will clean up slowly.",
+			info.RunningTarget.Type))
 		if err := d.UpdateAutoScalingGroup(ctx,
 			*info.IdlingTarget.AutoScalingGroup.AutoScalingGroupName,
 			nil,
@@ -407,7 +395,7 @@ func (d *Deployer) Deploy(
 			return err
 		}
 
-		if err = d.ShowStatus(ctx, nil); err != nil {
+		if err = d.ShowStatus(ctx); err != nil {
 			return err
 		}
 	}
@@ -444,29 +432,30 @@ func (d *Deployer) HealthCheck(ctx context.Context, targetGroupArn string, desir
 }
 
 func (d *Deployer) UpdateTraffic(ctx context.Context, blueWeight int32, greenWeight int32) error {
-	_, err := d.alb.ModifyRule(ctx, &alb.ModifyRuleInput{
-		RuleArn: &d.config.ListenerRuleArn,
-		Actions: []albTypes.Action{
+	forwardConfig := &albTypes.ForwardActionConfig{
+		TargetGroups: []albTypes.TargetGroupTuple{
 			{
-				Type: albTypes.ActionTypeEnumForward,
-				ForwardConfig: &albTypes.ForwardActionConfig{
-					TargetGroups: []albTypes.TargetGroupTuple{
-						{
-							TargetGroupArn: &d.config.Target.Blue.TargetGroupArn,
-							Weight:         &blueWeight,
-						},
-						{
-							TargetGroupArn: &d.config.Target.Green.TargetGroupArn,
-							Weight:         &greenWeight,
-						},
-					},
-					TargetGroupStickinessConfig: &albTypes.TargetGroupStickinessConfig{
-						DurationSeconds: aws.Int32(10),
-						Enabled:         aws.Bool(true),
-					},
-				},
+				TargetGroupArn: &d.config.Target.Blue.TargetGroupArn,
+				Weight:         &blueWeight,
+			},
+			{
+				TargetGroupArn: &d.config.Target.Green.TargetGroupArn,
+				Weight:         &greenWeight,
 			},
 		},
+	}
+
+	rule, err := d.getListenerRule(ctx)
+	if err != nil {
+		return err
+	}
+	if len(rule.Actions) > 0 {
+		forwardConfig.TargetGroupStickinessConfig = rule.Actions[0].ForwardConfig.TargetGroupStickinessConfig
+	}
+
+	_, err = d.alb.ModifyRule(ctx, &alb.ModifyRuleInput{
+		RuleArn: &d.config.ListenerRuleArn,
+		Actions: []albTypes.Action{{Type: albTypes.ActionTypeEnumForward, ForwardConfig: forwardConfig}},
 	})
 	if err != nil {
 		return errors.WithStack(err)
@@ -476,25 +465,33 @@ func (d *Deployer) UpdateTraffic(ctx context.Context, blueWeight int32, greenWei
 }
 
 func (d *Deployer) SwapTraffic(ctx context.Context, duration *time.Duration) error {
-	blue, err := d.GetDeployTarget(ctx, BlueTargetType)
+	rule, err := d.getListenerRule(ctx)
 	if err != nil {
 		return err
 	}
 
-	green, err := d.GetDeployTarget(ctx, GreenTargetType)
+	blue, err := d.GetDeployTarget(ctx, rule, BlueTargetType)
+	if err != nil {
+		return err
+	}
+
+	green, err := d.GetDeployTarget(ctx, rule, GreenTargetType)
 	if err != nil {
 		return err
 	}
 
 	if *duration > 0 {
-		d.logger.Info(fmt.Sprintf("Traffic update to blue->50%%, green->50%%, wait %.0f seconds.", duration.Seconds()))
+		d.logger.Info(fmt.Sprintf(
+			"Traffic update to blue->50%%, green->50%%, wait %.0f seconds.", duration.Seconds()))
 		if err := d.UpdateTraffic(ctx, int32(50), int32(50)); err != nil {
 			return err
 		}
 		time.Sleep(*duration)
 	}
 
-	d.logger.Info(fmt.Sprintf("Traffic update to blue->%d%%, green->%d%%.", *green.TargetGroup.Weight, *blue.TargetGroup.Weight))
+	d.logger.Info(fmt.Sprintf("Traffic update to blue->%d%%, green->%d%%.",
+		*green.TargetGroup.Weight,
+		*blue.TargetGroup.Weight))
 	return d.UpdateTraffic(ctx, *green.TargetGroup.Weight, *blue.TargetGroup.Weight)
 }
 
@@ -519,7 +516,33 @@ func (d *Deployer) UpdateAutoScalingGroup(
 	return nil
 }
 
-func (d *Deployer) CleanupAutoScalingGroup(ctx context.Context, autoScalingGroup *asgTypes.AutoScalingGroup) (ProcessResult, error) {
+func (d *Deployer) UpdateAutoScalingGroupByTarget(
+	ctx context.Context, targetType TargetType, desiredCapacity *int32, minSize *int32, maxSize *int32) error {
+
+	rule, err := d.getListenerRule(ctx)
+	if err != nil {
+		return err
+	}
+
+	target, err := d.GetDeployTarget(ctx, rule, targetType)
+	if err != nil {
+		return err
+	}
+
+	if err := d.UpdateAutoScalingGroup(ctx,
+		*target.AutoScalingGroup.AutoScalingGroupName,
+		desiredCapacity,
+		minSize,
+		maxSize); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (d *Deployer) CleanupAutoScalingGroup(
+	ctx context.Context, autoScalingGroup *asgTypes.AutoScalingGroup) (ProcessResult, error) {
+
 	if len(autoScalingGroup.Instances) <= 0 {
 		return ProcessSkipped, nil
 	}
@@ -550,20 +573,23 @@ func (d *Deployer) CleanupAutoScalingGroup(ctx context.Context, autoScalingGroup
 				return FinishRetry, nil
 			}
 
-			d.logger.Info(fmt.Sprintf("Cleanup ASG:'%s', desired:%d, min:%d, max:%d, instances:%d, lifecycle:{%s}",
+			d.logger.Info(fmt.Sprintf(
+				"Cleanup ASG:'%s', desired:%d, min:%d, max:%d, instances:%d, lifecycle:{%s}",
 				*autoScalingGroup.AutoScalingGroupName,
 				*current.DesiredCapacity,
 				*current.MinSize,
 				*current.MaxSize,
 				len(current.Instances),
-				d.getLifecycleStates(&current),
+				d.lifecycleStateToString(&current),
 			))
 
 			return ContinueRetry, nil
 		})
 }
 
-func (d *Deployer) MoveScheduledActions(ctx context.Context, fromAutoScalingGroupName string, toAutoScalingGroupName string) error {
+func (d *Deployer) MoveScheduledActions(
+	ctx context.Context, fromAutoScalingGroupName string, toAutoScalingGroupName string) error {
+
 	output, err := d.asg.DescribeScheduledActions(ctx, &asg.DescribeScheduledActionsInput{
 		AutoScalingGroupName: &fromAutoScalingGroupName,
 	})

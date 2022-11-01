@@ -131,7 +131,7 @@ func main() {
 		err = bundler.Download(ctx, internal.TargetType(*bundleDownloadTarget))
 
 	case ec2status.FullCommand():
-		err = deployer.ShowStatus(ctx, nil)
+		err = deployer.ShowStatus(ctx)
 
 	case ec2deploy.FullCommand():
 		if *ec2deploySilent == false && internal.AskToContinue() == false {
@@ -159,12 +159,8 @@ func main() {
 		err = deployer.UpdateTraffic(ctx, *ec2trafficBlueWeight, *ec2trafficGreenWeight)
 
 	case ec2autoscaling.FullCommand():
-		target, err := deployer.GetDeployTarget(ctx, internal.TargetType(*ec2autoscalingTarget))
-		if err != nil {
-			logger.Fatal("🚨 Command Failure", err)
-		}
-		err = deployer.UpdateAutoScalingGroup(ctx,
-			*target.AutoScalingGroup.AutoScalingGroupName,
+		err = deployer.UpdateAutoScalingGroupByTarget(ctx,
+			internal.TargetType(*ec2autoscalingTarget),
 			ec2autoscalingDesired,
 			ec2autoscalingMinSize,
 			ec2autoscalingMaxSize)
