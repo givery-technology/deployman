@@ -6,7 +6,7 @@ There are the following methods.
 
 ### 1. Download binary
 ```shell
-version=0.0.3; wget https://github.com/givery-technology/deployman/releases/download/${version}/deployman_${version}_linux_amd64.zip -O deployman.zip && unzip deployman.zip deployman && rm deployman.zip
+version=0.0.3 && wget https://github.com/givery-technology/deployman/releases/download/${version}/deployman_${version}_linux_amd64.zip -O deployman.zip && unzip deployman.zip deployman && rm deployman.zip
 ```
 
 ### 2. Compile from source
@@ -206,7 +206,7 @@ Flags:
   --config="./deployman.json"  [OPTIONAL] Configuration file path. By default, this value is './deployman.json'. If this file does not exist, an error will occur.
   --verbose                    [OPTIONAL] A detailed log containing call stacks will be error messages.
   --silent                     [OPTIONAL] Skip confirmation before process.
-  --cleanup                    [OPTIONAL] Skip cleanup of idle old AutoScalingGroups that are no longer needed after deployment.
+  --no-cleanup                 [OPTIONAL] Skip cleanup of idle old AutoScalingGroups that are no longer needed after deployment.
   --duration=0s                [OPTIONAL] Time to wait until traffic is completely swapped. Default is '0s'. If this value is set to '60s', the B/G traffic is distributed 50:50 and waits for 60 seconds. After that, the B/G traffic will be completely swapped.
 ```
 

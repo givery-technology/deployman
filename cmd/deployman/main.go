@@ -48,7 +48,7 @@ var (
 
 	ec2rollback          = ec2.Command("rollback", "Restore the AutoScalingGroup to their original state, then swap traffic.")
 	ec2rollbackSilent    = ec2rollback.Flag("silent", "[OPTIONAL] Skip confirmation before process.").Bool()
-	ec2rollbackNoCleanup = ec2rollback.Flag("cleanup", "[OPTIONAL] Skip cleanup of idle old AutoScalingGroups that are no longer needed after deployment.").Bool()
+	ec2rollbackNoCleanup = ec2rollback.Flag("no-cleanup", "[OPTIONAL] Skip cleanup of idle old AutoScalingGroups that are no longer needed after deployment.").Bool()
 	ec2rollbackSwapTime  = ec2rollback.Flag("duration", "[OPTIONAL] Time to wait until traffic is completely swapped. Default is '0s'. If this value is set to '60s', the B/G traffic is distributed 50:50 and waits for 60 seconds. After that, the B/G traffic will be completely swapped.").Default("0s").Duration()
 
 	ec2cleanup = ec2.Command("cleanup", "Terminate all instances that are idle, i.e., in an AutoScalingGroup with a traffic weight of 0. You can check the current status with the 'ec2 status' command.")
