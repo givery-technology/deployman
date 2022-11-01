@@ -57,18 +57,18 @@ var (
 	ec2swapDuration = ec2swap.Flag("duration", "[OPTIONAL] Time to wait until traffic is completely swapped. Default is '0s'. If this value is set to '60s', the B/G traffic is distributed 50:50 and waits for 60 seconds. After that, the B/G traffic will be completely swapped.").Default("0s").Duration()
 
 	ec2traffic            = ec2.Command("traffic", "Update the traffic of the respective target group of B/G to any value. You can check the current status with the 'ec2 status' command.")
-	ec2trafficBlueWeight  = ec2traffic.Flag("blue", "Traffic weight for blue TargetGroup").Required().Int32()
-	ec2trafficGreenWeight = ec2traffic.Flag("green", "Traffic weight for green TargetGroup").Required().Int32()
+	ec2trafficBlueWeight  = ec2traffic.Flag("blue", "[REQUIRED] Traffic weight for blue TargetGroup").Required().Int32()
+	ec2trafficGreenWeight = ec2traffic.Flag("green", "[REQUIRED] Traffic weight for green TargetGroup").Required().Int32()
 
 	ec2autoscaling        = ec2.Command("autoscaling", "Update the capacity of any AutoScalingGroup.")
-	ec2autoscalingTarget  = ec2autoscaling.Flag("target", "Target type of AutoScalingGroup. Valid values are either 'blue' or 'green'. The 'ec2 status' command allows you to check the target details.").Required().Enum("blue", "green")
-	ec2autoscalingDesired = ec2autoscaling.Flag("desired", "DesiredCapacity").Default("-1").Int32()
-	ec2autoscalingMinSize = ec2autoscaling.Flag("min", "MinSize").Default("-1").Int32()
-	ec2autoscalingMaxSize = ec2autoscaling.Flag("max", "MaxSize").Default("-1").Int32()
+	ec2autoscalingTarget  = ec2autoscaling.Flag("target", "[REQUIRED] Target type of AutoScalingGroup. Valid values are either 'blue' or 'green'. The 'ec2 status' command allows you to check the target details.").Required().Enum("blue", "green")
+	ec2autoscalingDesired = ec2autoscaling.Flag("desired", "[OPTIONAL] DesiredCapacity").Default("-1").Int32()
+	ec2autoscalingMinSize = ec2autoscaling.Flag("min", "[OPTIONAL] MinSize").Default("-1").Int32()
+	ec2autoscalingMaxSize = ec2autoscaling.Flag("max", "[OPTIONAL] MaxSize").Default("-1").Int32()
 
 	ec2moveScheduledActions     = ec2.Command("move-scheduled-actions", "Move ScheduledActions that exist in any AutoScalingGroup to another AutoScalingGroup.")
-	ec2moveScheduledActionsFrom = ec2moveScheduledActions.Flag("from", "Name of AutoScalingGroup").Required().String()
-	ec2moveScheduledActionsTo   = ec2moveScheduledActions.Flag("to", "Name of AutoScalingGroup").Required().String()
+	ec2moveScheduledActionsFrom = ec2moveScheduledActions.Flag("from", "[REQUIRED] Name of AutoScalingGroup").Required().String()
+	ec2moveScheduledActionsTo   = ec2moveScheduledActions.Flag("to", "[REQUIRED] Name of AutoScalingGroup").Required().String()
 )
 
 func main() {

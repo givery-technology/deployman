@@ -40,7 +40,7 @@ cd ./cmd/deployman && go build
 ```
 
 # Requirements
-- Requires `AWS_ACCESS_KEY/AWS_SECRET_ACCESS_KEY` or `AWS_PROFILE` environment variables.
+- Requires `AWS_ACCESS_KEY/AWS_SECRET_ACCESS_KEY` or `AWS_PROFILE`, and `AWS_REGION` environment variables.
 - You will need `deployman.json` in the same location as the deploynam The contents are as follows.
 
     ```json
@@ -269,8 +269,8 @@ Flags:
   --help                       Show context-sensitive help (also try --help-long and --help-man).
   --config="./deployman.json"  [OPTIONAL] Configuration file path. By default, this value is './deployman.json'. If this file does not exist, an error will occur.
   --verbose                    [OPTIONAL] A detailed log containing call stacks will be error messages.
-  --blue=BLUE                  Traffic weight for blue TargetGroup
-  --green=GREEN                Traffic weight for green TargetGroup
+  --blue=BLUE                  [REQUIRED] Traffic weight for blue TargetGroup
+  --green=GREEN                [REQUIRED] Traffic weight for green TargetGroup
 ```
 
 ### ec2 autoscaling
@@ -283,10 +283,10 @@ Flags:
   --help                       Show context-sensitive help (also try --help-long and --help-man).
   --config="./deployman.json"  [OPTIONAL] Configuration file path. By default, this value is './deployman.json'. If this file does not exist, an error will occur.
   --verbose                    [OPTIONAL] A detailed log containing call stacks will be error messages.
-  --target=TARGET              Target type of AutoScalingGroup. Valid values are either 'blue' or 'green'. The 'ec2 status' command allows you to check the target details.
-  --desired=-1                 DesiredCapacity
-  --min=-1                     MinSize
-  --max=-1                     MaxSize
+  --target=TARGET              [REQUIRED] Target type of AutoScalingGroup. Valid values are either 'blue' or 'green'. The 'ec2 status' command allows you to check the target details.
+  --desired=-1                 [OPTIONAL] DesiredCapacity
+  --min=-1                     [OPTIONAL] MinSize
+  --max=-1                     [OPTIONAL] MaxSize
 ```
 
 ### ec2 move-scheduled-actions
@@ -299,6 +299,6 @@ Flags:
   --help                       Show context-sensitive help (also try --help-long and --help-man).
   --config="./deployman.json"  [OPTIONAL] Configuration file path. By default, this value is './deployman.json'. If this file does not exist, an error will occur.
   --verbose                    [OPTIONAL] A detailed log containing call stacks will be error messages.
-  --from=FROM                  Name of AutoScalingGroup
-  --to=TO                      Name of AutoScalingGroup
+  --from=FROM                  [REQUIRED] Name of AutoScalingGroup
+  --to=TO                      [REQUIRED] Name of AutoScalingGroup
 ```
