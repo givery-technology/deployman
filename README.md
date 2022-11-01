@@ -1,5 +1,19 @@
 # Deployman
-A CLI for controlling ALB and two AutoScalingGroups and performing Blue/Green Deployment.
+A CLI for controlling ALB and 2 AutoScalingGroups and performing Blue/Green Deployment.
+
+# How it works
+### About deployment
+This CLI enables B/G deployments by manipulating ALB weighted target groups to control traffic. It works as follows.
+
+1. set the capacity of the AutoScalingGroup associated with the blue target group to the same state as the capacity of the AutoScalingGroup associated with the green target group.
+2. change the two weighted target groups in the ALB listener rule to swap traffic.
+3. Once the traffic has been replaced, set the capacity (MinSize) of the AutoScalingGroup associated with the blue target group to 0. This is designed with the assumption that the capacity will gradually shrink due to auto scale-in.
+4. rollback can be performed if necessary.
+
+    ![./conceptual.png](./conceptual.png)
+
+### About bundle management
+This CLI has the ability to register and search for the respective application bundles in blue or green to achieve the above deployment.
 
 # Install
 There are the following methods.
