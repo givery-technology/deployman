@@ -5,9 +5,8 @@ A CLI for controlling ALB and two AutoScalingGroups and performing Blue/Green De
 There are the following methods.
 
 ### 1. Download binary
-```bash
-asset_id=$(curl -sL https://$GITHUB_TOKEN@api.github.com/repos/givery-technology/deployman/releases/tags/0.0.1 | jq '.assets[] | select(.name | contains("darwin_arm64")) | .id' | tee /dev/tty)
-curl -sLJO -H 'Accept: application/octet-stream' "https://$GITHUB_TOKEN@api.github.com/repos/givery-technology/deployman/releases/assets/$asset_id"
+```shell
+version=0.0.3; wget https://github.com/givery-technology/deployman/releases/download/${version}/deployman_${version}_linux_amd64.zip -O deployman.zip && unzip deployman.zip deployman && rm deployman.zip
 ```
 
 ### 2. Compile from source
@@ -18,7 +17,7 @@ cd ./cmd/deployman && go build
 
 # Requirements
 - Requires `AWS_ACCESS_KEY/AWS_SECRET_ACCESS_KEY` or `AWS_PROFILE` environment variables.
-- You will need `config.json` in the same location as the deploynam The contents are as follows.
+- You will need `deployman.json` in the same location as the deploynam The contents are as follows.
 
     ```json
     {
