@@ -476,14 +476,6 @@ func (d *Deployer) UpdateTraffic(ctx context.Context, blueWeight int32, greenWei
 }
 
 func (d *Deployer) SwapTraffic(ctx context.Context, duration *time.Duration) error {
-	if *duration > 0 {
-		d.logger.Info(fmt.Sprintf("Traffic update to blue->50%%, green->50%%, wait %.0f seconds.", duration.Seconds()))
-		if err := d.UpdateTraffic(ctx, int32(50), int32(50)); err != nil {
-			return err
-		}
-		time.Sleep(*duration)
-	}
-
 	blue, err := d.GetDeployTarget(ctx, BlueTargetType)
 	if err != nil {
 		return err
@@ -492,6 +484,14 @@ func (d *Deployer) SwapTraffic(ctx context.Context, duration *time.Duration) err
 	green, err := d.GetDeployTarget(ctx, GreenTargetType)
 	if err != nil {
 		return err
+	}
+
+	if *duration > 0 {
+		d.logger.Info(fmt.Sprintf("Traffic update to blue->50%%, green->50%%, wait %.0f seconds.", duration.Seconds()))
+		if err := d.UpdateTraffic(ctx, int32(50), int32(50)); err != nil {
+			return err
+		}
+		time.Sleep(*duration)
 	}
 
 	d.logger.Info(fmt.Sprintf("Traffic update to blue->%d%%, green->%d%%.", *green.TargetGroup.Weight, *blue.TargetGroup.Weight))
