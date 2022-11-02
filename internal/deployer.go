@@ -19,13 +19,11 @@ import (
 const (
 	BlueTargetType  TargetType = "blue"
 	GreenTargetType TargetType = "green"
-
-	ProcessSkipped   ProcessResult = false
-	ProcessCompleted ProcessResult = true
 )
 
+var CancellationError = errors.New("CancellationError")
+
 type TargetType string
-type ProcessResult bool
 
 type Deployer struct {
 	asg    *asg.Client
@@ -134,14 +132,14 @@ func (d *Deployer) lifecycleStateToString(autoScalingGroup *asgTypes.AutoScaling
 		}
 	}
 	var states []string
-	for k, v := range lifecycleStates {
-		states = append(states, fmt.Sprintf("%s:%d", string(k), v))
+	for state, count := range lifecycleStates {
+		states = append(states, fmt.Sprintf("%s:%d", string(state), count))
 	}
-	state := ""
+	result := ""
 	if len(states) > 0 {
-		state = strings.Join(states, ",")
+		result = strings.Join(states, ",")
 	}
-	return state
+	return result
 }
 
 func (d *Deployer) GetDeployTarget(
@@ -213,7 +211,8 @@ func (d *Deployer) GetDeployInfo(ctx context.Context) (*DeployInfo, error) {
 			RunningTarget: green,
 		}, nil
 	} else {
-		return nil, errors.Errorf("Failed to identify idling and running target groups. Either two weighted TargetGroup must be 0")
+		return nil, errors.Errorf(
+			"Failed to identify idling and running target groups. Either two weighted TargetGroup must be 0")
 	}
 }
 
@@ -304,30 +303,24 @@ func (d *Deployer) ShowStatus(ctx context.Context) error {
 }
 
 func (d *Deployer) Deploy(
-	ctx context.Context, swap bool, cleanupBeforeDeploy bool, cleanupAfterDeploy bool, swapDuration *time.Duration) error {
+	ctx context.Context, swap bool,
+	cleanupBeforeDeploy bool,
+	cleanupAfterDeploy bool,
+	swapDuration *time.Duration) error {
 
 	info, err := d.GetDeployInfo(ctx)
 	if err != nil {
 		return err
 	}
 
-	d.logger.Info("Show current status.")
-	if err := d.ShowStatus(ctx); err != nil {
-		return err
-	}
-
 	if cleanupBeforeDeploy {
-		cleanupResult, err := d.CleanupAutoScalingGroup(ctx, info.IdlingTarget.AutoScalingGroup)
+		d.logger.Info(fmt.Sprintf("Start cleanup on idle '%s' target.", string(info.IdlingTarget.Type)))
+
+		err := d.CleanupAutoScalingGroup(ctx, *info.IdlingTarget.AutoScalingGroup.AutoScalingGroupName)
 		if err != nil {
 			return err
 		}
-
-		if cleanupResult == ProcessCompleted {
-			d.logger.Info("Cleanup completed.")
-			if err := d.ShowStatus(ctx); err != nil {
-				return err
-			}
-		}
+		d.logger.Info("Cleanup completed.")
 	}
 
 	//TODO: Actually, it may be necessary, so I'll keep it as a comment.
@@ -342,22 +335,32 @@ func (d *Deployer) Deploy(
 	//	}
 	//}()
 
-	d.logger.Info(fmt.Sprintf("Start updating AutoScalingGruop of the '%s' target. Prepare instances of the same capacity as the '%s' target.",
+	d.logger.Info(fmt.Sprintf(
+		"Start updating AutoScalingGruop of the '%s' target. Prepare instances of the same capacity as the '%s' target.",
 		info.IdlingTarget.Type,
 		info.RunningTarget.Type))
-	if err := d.UpdateAutoScalingGroup(ctx,
+	err = d.UpdateAutoScalingGroup(ctx,
 		*info.IdlingTarget.AutoScalingGroup.AutoScalingGroupName,
 		info.RunningTarget.AutoScalingGroup.DesiredCapacity,
 		info.RunningTarget.AutoScalingGroup.MinSize,
-		info.RunningTarget.AutoScalingGroup.MaxSize); err != nil {
+		info.RunningTarget.AutoScalingGroup.MaxSize)
+	if err != nil {
 		return err
 	}
-
 	d.logger.Info("AutoScalingGroup has been updated.")
+
 	d.logger.Info(fmt.Sprintf("Start '%s' health check.", info.IdlingTarget.Type))
-	if err := d.HealthCheck(ctx,
+	err = d.HealthCheck(ctx,
 		*info.IdlingTarget.TargetGroup.TargetGroupArn,
-		int(*info.RunningTarget.AutoScalingGroup.DesiredCapacity)); err != nil {
+		int(*info.RunningTarget.AutoScalingGroup.DesiredCapacity))
+	if err != nil {
+		if errors.Is(err, RetryTimeout) {
+			d.logger.Error("Health check timed out. Initiating a rollback as the process cannot continue.", nil)
+			if err := d.CleanupAutoScalingGroup(ctx, *info.IdlingTarget.AutoScalingGroup.AutoScalingGroupName); err != nil {
+				return errors.WithMessage(err, "Rollback failed.")
+			}
+			return CancellationError
+		}
 		return err
 	}
 
@@ -367,12 +370,12 @@ func (d *Deployer) Deploy(
 	}
 
 	if swap {
-		d.logger.Info("Start update traffic.")
+		d.logger.Info("Start swap traffic.")
 		if err := d.SwapTraffic(ctx, swapDuration); err != nil {
 			return err
 		}
 
-		d.logger.Info("Traffic update completed.")
+		d.logger.Info("Traffic swap completed.")
 		if err := d.ShowStatus(ctx); err != nil {
 			return err
 		}
@@ -387,14 +390,14 @@ func (d *Deployer) Deploy(
 		d.logger.Info(fmt.Sprintf(
 			"Update '%s' target MinSize to 0 to clean up instances that are no longer needed. The automatic scale-in will clean up slowly.",
 			info.RunningTarget.Type))
-		if err := d.UpdateAutoScalingGroup(ctx,
+		err = d.UpdateAutoScalingGroup(ctx,
 			*info.IdlingTarget.AutoScalingGroup.AutoScalingGroupName,
 			nil,
 			aws.Int32(0),
-			nil); err != nil {
+			nil)
+		if err != nil {
 			return err
 		}
-
 		if err = d.ShowStatus(ctx); err != nil {
 			return err
 		}
@@ -529,39 +532,30 @@ func (d *Deployer) UpdateAutoScalingGroupByTarget(
 		return err
 	}
 
-	if err := d.UpdateAutoScalingGroup(ctx,
+	err = d.UpdateAutoScalingGroup(ctx,
 		*target.AutoScalingGroup.AutoScalingGroupName,
 		desiredCapacity,
 		minSize,
-		maxSize); err != nil {
+		maxSize)
+	if err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (d *Deployer) CleanupAutoScalingGroup(
-	ctx context.Context, autoScalingGroup *asgTypes.AutoScalingGroup) (ProcessResult, error) {
-
-	if len(autoScalingGroup.Instances) <= 0 {
-		return ProcessSkipped, nil
-	}
-
-	d.logger.Info("Unused idling instances detected so start cleaning up AutoScalingGroup.")
-
-	if err := d.UpdateAutoScalingGroup(ctx, *autoScalingGroup.AutoScalingGroupName,
-		aws.Int32(0),
-		aws.Int32(0),
-		nil); err != nil {
-		return ProcessSkipped, errors.WithStack(err)
+func (d *Deployer) CleanupAutoScalingGroup(ctx context.Context, autoScalingGroupName string) error {
+	if err := d.UpdateAutoScalingGroup(
+		ctx, autoScalingGroupName, aws.Int32(0), aws.Int32(0), nil); err != nil {
+		return errors.WithStack(err)
 	}
 
 	maxLimit := d.config.RetryPolicy.MaxLimit
 	interval := aws.Duration(time.Duration(d.config.RetryPolicy.IntervalSeconds) * time.Second)
-	return ProcessCompleted, NewFixedIntervalRetryer(maxLimit, interval).Start(
+	return NewFixedIntervalRetryer(maxLimit, interval).Start(
 		func(index int, interval *time.Duration) (RetryResult, error) {
 			output, err := d.asg.DescribeAutoScalingGroups(ctx, &asg.DescribeAutoScalingGroupsInput{
-				AutoScalingGroupNames: []string{*autoScalingGroup.AutoScalingGroupName},
+				AutoScalingGroupNames: []string{autoScalingGroupName},
 			})
 			if err != nil {
 				return FinishRetry, errors.WithStack(err)
@@ -575,7 +569,7 @@ func (d *Deployer) CleanupAutoScalingGroup(
 
 			d.logger.Info(fmt.Sprintf(
 				"Cleanup ASG:'%s', desired:%d, min:%d, max:%d, instances:%d, lifecycle:{%s}",
-				*autoScalingGroup.AutoScalingGroupName,
+				autoScalingGroupName,
 				*current.DesiredCapacity,
 				*current.MinSize,
 				*current.MaxSize,

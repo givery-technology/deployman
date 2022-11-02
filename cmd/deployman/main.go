@@ -6,6 +6,7 @@ import (
 	"github.com/alecthomas/kingpin"
 	awsConfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/givery-technology/deployman/internal"
+	"github.com/pkg/errors"
 	"os"
 	"os/signal"
 	"syscall"
@@ -134,23 +135,38 @@ func main() {
 		err = deployer.ShowStatus(ctx)
 
 	case ec2deploy.FullCommand():
+		if err = deployer.ShowStatus(ctx); err != nil {
+			break
+		}
 		if *ec2deploySilent == false && internal.AskToContinue() == false {
 			logger.Fatal("🚨 Command Cancelled", nil)
 		}
 		err = deployer.Deploy(ctx, true, true, !*ec2deployNoCleanup, ec2deploySwapTime)
+		if errors.Is(err, internal.CancellationError) {
+			logger.Fatal("🚨 Command Cancelled", err)
+		}
 
 	case ec2rollback.FullCommand():
+		if err = deployer.ShowStatus(ctx); err != nil {
+			break
+		}
 		if *ec2rollbackSilent == false && internal.AskToContinue() == false {
 			logger.Fatal("🚨 Command Cancelled", nil)
 		}
 		err = deployer.Deploy(ctx, true, false, !*ec2rollbackNoCleanup, ec2rollbackSwapTime)
+		if errors.Is(err, internal.CancellationError) {
+			logger.Fatal("🚨 Command Cancelled", err)
+		}
 
 	case ec2cleanup.FullCommand():
 		info, err := deployer.GetDeployInfo(ctx)
 		if err != nil {
 			logger.Fatal("🚨 Command Failure", err)
 		}
-		_, err = deployer.CleanupAutoScalingGroup(ctx, info.IdlingTarget.AutoScalingGroup)
+		err = deployer.CleanupAutoScalingGroup(ctx, *info.IdlingTarget.AutoScalingGroup.AutoScalingGroupName)
+		if errors.Is(err, internal.CancellationError) {
+			logger.Fatal("🚨 Command Cancelled", err)
+		}
 
 	case ec2swap.FullCommand():
 		err = deployer.SwapTraffic(ctx, ec2swapDuration)
