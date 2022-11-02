@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/aws"
-	asg "github.com/aws/aws-sdk-go-v2/service/autoscaling"
 	asgTypes "github.com/aws/aws-sdk-go-v2/service/autoscaling/types"
-	alb "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
 	albTypes "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
@@ -26,10 +24,8 @@ var CancellationError = errors.New("CancellationError")
 type TargetType string
 
 type Deployer struct {
-	asg    *asg.Client
-	alb    *alb.Client
-	region string
 	config *Config
+	client AwsClient
 	logger Logger
 }
 
@@ -54,66 +50,29 @@ type HealthInfo struct {
 	DrainingCount  int
 }
 
-func NewDeployer(awsRegion string, awsConfig *aws.Config, deployConfig *Config, logger Logger) *Deployer {
+func NewDeployer(deployConfig *Config, awsClient AwsClient, logger Logger) *Deployer {
 	return &Deployer{
-		alb:    alb.NewFromConfig(*awsConfig),
-		asg:    asg.NewFromConfig(*awsConfig),
-		region: awsRegion,
 		config: deployConfig,
+		client: awsClient,
 		logger: logger,
 	}
 }
 
-// TODO: Actually, it may be necessary, so I'll keep it as a comment.
-//func (d *Deployer) suspendAutoScalingProcesses(ctx context.Context, autoScalingGroupName string, scalingProcesses []string) error {
-//	_, err := d.asg.SuspendProcesses(ctx, &asg.SuspendProcessesInput{
-//		AutoScalingGroupName: &autoScalingGroupName,
-//		ScalingProcesses:     scalingProcesses,
-//	})
-//	if err != nil {
-//		return errors.WithStack(err)
-//	}
-//
-//	return nil
-//}
-//
-//func (d *Deployer) resumeAutoScalingProcesses(ctx context.Context, autoScalingGroupName string, scalingProcesses []string) error {
-//	_, err := d.asg.ResumeProcesses(ctx, &asg.ResumeProcessesInput{
-//		AutoScalingGroupName: &autoScalingGroupName,
-//		ScalingProcesses:     scalingProcesses,
-//	})
-//	if err != nil {
-//		return errors.WithStack(err)
-//	}
-//
-//	return nil
-//}
-
-func (d *Deployer) getListenerRule(ctx context.Context) (*albTypes.Rule, error) {
-	output, err := d.alb.DescribeRules(ctx, &alb.DescribeRulesInput{RuleArns: []string{d.config.ListenerRuleArn}})
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-	return &output.Rules[0], nil
-}
-
 func (d *Deployer) getHealthInfo(ctx context.Context, targetGroupArn string) (*HealthInfo, error) {
-	health, err := d.alb.DescribeTargetHealth(ctx, &alb.DescribeTargetHealthInput{
-		TargetGroupArn: &targetGroupArn,
-	})
+	health, err := d.client.DescribeALBTargetHealth(ctx, targetGroupArn)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	countBy := func(state albTypes.TargetHealthStateEnum) int {
-		return Count(&health.TargetHealthDescriptions, func(desc *albTypes.TargetHealthDescription) bool {
+		return Count(&health, func(desc *albTypes.TargetHealthDescription) bool {
 			return desc.TargetHealth.State == state
 		})
 	}
 
 	return &HealthInfo{
 		TargetGroupArn: targetGroupArn,
-		TotalCount:     len(health.TargetHealthDescriptions),
+		TotalCount:     len(health),
 		HealthyCount:   countBy(albTypes.TargetHealthStateEnumHealthy),
 		UnhealthyCount: countBy(albTypes.TargetHealthStateEnumUnhealthy),
 		UnusedCount:    countBy(albTypes.TargetHealthStateEnumUnused),
@@ -166,11 +125,9 @@ func (d *Deployer) GetDeployTarget(
 		}
 	}
 
-	output, err := d.asg.DescribeAutoScalingGroups(ctx, &asg.DescribeAutoScalingGroupsInput{
-		AutoScalingGroupNames: []string{target.AutoScalingGroupName},
-	})
+	autoScalingGroup, err := d.client.DescribeAutoScalingGroup(ctx, target.AutoScalingGroupName)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	if targetGroupTuple == nil {
@@ -180,12 +137,12 @@ func (d *Deployer) GetDeployTarget(
 	return &DeployTarget{
 		Type:             targetType,
 		TargetGroup:      targetGroupTuple,
-		AutoScalingGroup: &output.AutoScalingGroups[0],
+		AutoScalingGroup: autoScalingGroup,
 	}, nil
 }
 
 func (d *Deployer) GetDeployInfo(ctx context.Context) (*DeployInfo, error) {
-	rule, err := d.getListenerRule(ctx)
+	rule, err := d.client.GetALBListenerRule(ctx, d.config.ListenerRuleArn)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +175,7 @@ func (d *Deployer) GetDeployInfo(ctx context.Context) (*DeployInfo, error) {
 
 func (d *Deployer) ShowStatus(ctx context.Context) error {
 	//DeployTarget
-	rule, err := d.getListenerRule(ctx)
+	rule, err := d.client.GetALBListenerRule(ctx, d.config.ListenerRuleArn)
 	if err != nil {
 		return err
 	}
@@ -233,13 +190,11 @@ func (d *Deployer) ShowStatus(ctx context.Context) error {
 
 	//TargetGroupName
 	getTargetGroupName := func(targetGroupArn string) (string, error) {
-		output, err := d.alb.DescribeTargetGroups(ctx, &alb.DescribeTargetGroupsInput{
-			TargetGroupArns: []string{targetGroupArn},
-		})
+		targetGroup, err := d.client.DescribeALBTargetGroup(ctx, targetGroupArn)
 		if err != nil {
-			return "", errors.WithStack(err)
+			return "", err
 		}
-		return *output.TargetGroups[0].TargetGroupName, nil
+		return *targetGroup.TargetGroupName, nil
 	}
 	blueTGName, err := getTargetGroupName(d.config.Target.Blue.TargetGroupArn)
 	if err != nil {
@@ -322,18 +277,6 @@ func (d *Deployer) Deploy(
 		}
 		d.logger.Info("Cleanup completed.")
 	}
-
-	//TODO: Actually, it may be necessary, so I'll keep it as a comment.
-	// see: https://docs.aws.amazon.com/codedeploy/latest/userguide/integrations-aws-auto-scaling.html#integrations-aws-auto-scaling-behaviors-mixed-environment
-	//scalingProcesses := []string{"AZRebalance", "AlarmNotification", "ScheduledActions", "ReplaceUnhealthy"}
-	//if err := d.suspendAutoScalingProcesses(ctx, *info.RunningTarget.AutoScalingGroup.AutoScalingGroupName, scalingProcesses); err != nil {
-	//	d.logger.Warn("ScalingProcesses failed to suspend, but will continue processing", err)
-	//}
-	//defer func() {
-	//	if err := d.resumeAutoScalingProcesses(ctx, *info.RunningTarget.AutoScalingGroup.AutoScalingGroupName, scalingProcesses); err != nil {
-	//		d.logger.Warn("ScalingProcesses failed to resume", err)
-	//	}
-	//}()
 
 	d.logger.Info(fmt.Sprintf(
 		"Start updating AutoScalingGruop of the '%s' target. Prepare instances of the same capacity as the '%s' target.",
@@ -435,7 +378,7 @@ func (d *Deployer) HealthCheck(ctx context.Context, targetGroupArn string, desir
 }
 
 func (d *Deployer) UpdateTraffic(ctx context.Context, blueWeight int32, greenWeight int32) error {
-	forwardConfig := &albTypes.ForwardActionConfig{
+	forwardAction := &albTypes.ForwardActionConfig{
 		TargetGroups: []albTypes.TargetGroupTuple{
 			{
 				TargetGroupArn: &d.config.Target.Blue.TargetGroupArn,
@@ -448,27 +391,23 @@ func (d *Deployer) UpdateTraffic(ctx context.Context, blueWeight int32, greenWei
 		},
 	}
 
-	rule, err := d.getListenerRule(ctx)
+	rule, err := d.client.GetALBListenerRule(ctx, d.config.ListenerRuleArn)
 	if err != nil {
 		return err
 	}
 	if len(rule.Actions) > 0 {
-		forwardConfig.TargetGroupStickinessConfig = rule.Actions[0].ForwardConfig.TargetGroupStickinessConfig
+		forwardAction.TargetGroupStickinessConfig = rule.Actions[0].ForwardConfig.TargetGroupStickinessConfig
 	}
 
-	_, err = d.alb.ModifyRule(ctx, &alb.ModifyRuleInput{
-		RuleArn: &d.config.ListenerRuleArn,
-		Actions: []albTypes.Action{{Type: albTypes.ActionTypeEnumForward, ForwardConfig: forwardConfig}},
-	})
-	if err != nil {
-		return errors.WithStack(err)
+	if err = d.client.ModifyALBListenerRule(ctx, d.config.ListenerRuleArn, forwardAction); err != nil {
+		return err
 	}
 
 	return nil
 }
 
 func (d *Deployer) SwapTraffic(ctx context.Context, duration *time.Duration) error {
-	rule, err := d.getListenerRule(ctx)
+	rule, err := d.client.GetALBListenerRule(ctx, d.config.ListenerRuleArn)
 	if err != nil {
 		return err
 	}
@@ -501,28 +440,13 @@ func (d *Deployer) SwapTraffic(ctx context.Context, duration *time.Duration) err
 func (d *Deployer) UpdateAutoScalingGroup(
 	ctx context.Context, autoScalingGroupName string, desiredCapacity *int32, minSize *int32, maxSize *int32) error {
 
-	input := &asg.UpdateAutoScalingGroupInput{AutoScalingGroupName: &autoScalingGroupName}
-	if desiredCapacity != nil && *desiredCapacity >= 0 {
-		input.DesiredCapacity = desiredCapacity
-	}
-	if minSize != nil && *minSize >= 0 {
-		input.MinSize = minSize
-	}
-	if maxSize != nil && *maxSize >= 0 {
-		input.MaxSize = maxSize
-	}
-	_, err := d.asg.UpdateAutoScalingGroup(ctx, input)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-
-	return nil
+	return d.client.UpdateAutoScalingGroup(ctx, autoScalingGroupName, desiredCapacity, minSize, maxSize)
 }
 
 func (d *Deployer) UpdateAutoScalingGroupByTarget(
 	ctx context.Context, targetType TargetType, desiredCapacity *int32, minSize *int32, maxSize *int32) error {
 
-	rule, err := d.getListenerRule(ctx)
+	rule, err := d.client.GetALBListenerRule(ctx, d.config.ListenerRuleArn)
 	if err != nil {
 		return err
 	}
@@ -547,21 +471,17 @@ func (d *Deployer) UpdateAutoScalingGroupByTarget(
 func (d *Deployer) CleanupAutoScalingGroup(ctx context.Context, autoScalingGroupName string) error {
 	if err := d.UpdateAutoScalingGroup(
 		ctx, autoScalingGroupName, aws.Int32(0), aws.Int32(0), nil); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	maxLimit := d.config.RetryPolicy.MaxLimit
 	interval := aws.Duration(time.Duration(d.config.RetryPolicy.IntervalSeconds) * time.Second)
 	return NewFixedIntervalRetryer(maxLimit, interval).Start(
 		func(index int, interval *time.Duration) (RetryResult, error) {
-			output, err := d.asg.DescribeAutoScalingGroups(ctx, &asg.DescribeAutoScalingGroupsInput{
-				AutoScalingGroupNames: []string{autoScalingGroupName},
-			})
+			current, err := d.client.DescribeAutoScalingGroup(ctx, autoScalingGroupName)
 			if err != nil {
-				return FinishRetry, errors.WithStack(err)
+				return FinishRetry, err
 			}
-
-			current := output.AutoScalingGroups[0]
 
 			if len(current.Instances) <= 0 {
 				return FinishRetry, nil
@@ -574,7 +494,7 @@ func (d *Deployer) CleanupAutoScalingGroup(ctx context.Context, autoScalingGroup
 				*current.MinSize,
 				*current.MaxSize,
 				len(current.Instances),
-				d.lifecycleStateToString(&current),
+				d.lifecycleStateToString(current),
 			))
 
 			return ContinueRetry, nil
@@ -584,40 +504,22 @@ func (d *Deployer) CleanupAutoScalingGroup(ctx context.Context, autoScalingGroup
 func (d *Deployer) MoveScheduledActions(
 	ctx context.Context, fromAutoScalingGroupName string, toAutoScalingGroupName string) error {
 
-	output, err := d.asg.DescribeScheduledActions(ctx, &asg.DescribeScheduledActionsInput{
-		AutoScalingGroupName: &fromAutoScalingGroupName,
-	})
+	fromActions, err := d.client.DescribeScheduledActions(ctx, fromAutoScalingGroupName)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
-	if len(output.ScheduledUpdateGroupActions) <= 0 {
+	if len(fromActions) <= 0 {
 		return nil
 	}
 
 	msg := fmt.Sprintf(" from:%s, to:%s", fromAutoScalingGroupName, toAutoScalingGroupName)
-	for _, from := range output.ScheduledUpdateGroupActions {
-		_, err := d.asg.PutScheduledUpdateGroupAction(ctx, &asg.PutScheduledUpdateGroupActionInput{
-			AutoScalingGroupName: &toAutoScalingGroupName,
-			ScheduledActionName:  from.ScheduledActionName,
-			DesiredCapacity:      from.DesiredCapacity,
-			EndTime:              from.EndTime,
-			MaxSize:              from.MaxSize,
-			MinSize:              from.MinSize,
-			Recurrence:           from.Recurrence,
-			StartTime:            from.StartTime,
-			Time:                 from.Time,
-			TimeZone:             from.TimeZone,
-		})
-		if err != nil {
+	for _, from := range fromActions {
+		if err := d.client.PutScheduledUpdateGroupAction(ctx, toAutoScalingGroupName, &from); err != nil {
 			d.logger.Warn("Failed to copy ScheduledActions, but processing continues."+msg, err)
 			continue
 		}
-		_, err = d.asg.DeleteScheduledAction(ctx, &asg.DeleteScheduledActionInput{
-			AutoScalingGroupName: from.AutoScalingGroupName,
-			ScheduledActionName:  from.ScheduledActionName,
-		})
-		if err != nil {
+		if err := d.client.DeleteScheduledAction(ctx, *from.AutoScalingGroupName, *from.ScheduledActionName); err != nil {
 			d.logger.Warn("Failed to delete ScheduledActions, but processing continues."+msg, err)
 			continue
 		}

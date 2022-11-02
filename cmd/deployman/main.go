@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/alecthomas/kingpin"
-	awsConfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/givery-technology/deployman/internal"
 	"github.com/pkg/errors"
 	"os"
@@ -95,8 +94,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	awsDefaultRegion := internal.GetEnv("AWS_REGION", "us-east-1")
-	awsDefaultConfig, err := awsConfig.LoadDefaultConfig(ctx, awsConfig.WithRegion(awsDefaultRegion))
+	awsClient, err := internal.NewDefaultAwsClient(ctx)
 	if err != nil {
 		logger.Fatal("🚨 Command Failure", err)
 	}
@@ -106,8 +104,15 @@ func main() {
 		logger.Fatal("🚨 Command Failure", err)
 	}
 
-	deployer := internal.NewDeployer(awsDefaultRegion, &awsDefaultConfig, deployConfig, logger)
-	bundler := internal.NewBundler(awsDefaultRegion, &awsDefaultConfig, deployConfig, logger)
+	deployer := internal.NewDeployer(deployConfig, awsClient, logger)
+	if err != nil {
+		logger.Fatal("🚨 Command Failure", err)
+	}
+
+	bundler, err := internal.NewBundler(deployConfig, awsClient, logger)
+	if err != nil {
+		logger.Fatal("🚨 Command Failure", err)
+	}
 
 	switch command {
 	case bundleRegister.FullCommand():
@@ -119,14 +124,14 @@ func main() {
 			if err != nil {
 				break
 			}
-			err = bundler.Activate(ctx, info.IdlingTarget.Type, bundleRegisterName)
+			err = bundler.Activate(ctx, info.IdlingTarget.Type, *bundleRegisterName)
 		}
 
 	case bundleList.FullCommand():
 		err = bundler.ListBundles(ctx)
 
 	case bundleActivate.FullCommand():
-		err = bundler.Activate(ctx, internal.TargetType(*bundleActivateTarget), bundleActivateName)
+		err = bundler.Activate(ctx, internal.TargetType(*bundleActivateTarget), *bundleActivateName)
 
 	case bundleDownload.FullCommand():
 		err = bundler.Download(ctx, internal.TargetType(*bundleDownloadTarget))
