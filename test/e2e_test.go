@@ -173,28 +173,39 @@ func TestE2E(t *testing.T) {
 
 	t.Run("EC2MoveScheduledAction", func(t *testing.T) {
 		now := time.Now()
-		state := NewTestingState(config).WithAutoScalingGroupScheduledAction(
-			"fromASG", []asgTypes.ScheduledUpdateGroupAction{
-				{
-					AutoScalingGroupName: aws.String("fromASG"),
-					DesiredCapacity:      aws.Int32(1),
-					MinSize:              aws.Int32(2),
-					MaxSize:              aws.Int32(3),
-					Recurrence:           aws.String("1/* * * * *"),
-					ScheduledActionARN:   aws.String("fromARN"),
-					ScheduledActionName:  aws.String("fromAction"),
-					StartTime:            aws.Time(now),
-					EndTime:              aws.Time(now.Add(24 + time.Hour)),
-					TimeZone:             aws.String(config.TimeZone.Location),
-				},
+		scheduledActions := []asgTypes.ScheduledUpdateGroupAction{
+			{
+				AutoScalingGroupName: aws.String("fromASG"),
+				DesiredCapacity:      aws.Int32(1),
+				MinSize:              aws.Int32(2),
+				MaxSize:              aws.Int32(3),
+				Recurrence:           aws.String("1/* * * * *"),
+				ScheduledActionARN:   aws.String("fromARN001"),
+				ScheduledActionName:  aws.String("fromAction001"),
+				StartTime:            aws.Time(now),
+				EndTime:              aws.Time(now.Add(24 + time.Hour)),
+				TimeZone:             aws.String(config.TimeZone.Location),
 			},
+			{
+				AutoScalingGroupName: aws.String("fromASG"),
+				DesiredCapacity:      aws.Int32(1),
+				MinSize:              aws.Int32(2),
+				MaxSize:              aws.Int32(3),
+				Recurrence:           aws.String("1/* * * * *"),
+				ScheduledActionARN:   aws.String("fromARN002"),
+				ScheduledActionName:  aws.String("fromAction002"),
+				StartTime:            aws.Time(now),
+				EndTime:              aws.Time(now.Add(24 + time.Hour)),
+				TimeZone:             aws.String(config.TimeZone.Location),
+			},
+		}
+		state := NewTestingState(config).WithAutoScalingGroupScheduledAction(
+			"fromASG", scheduledActions,
 			"toASG", []asgTypes.ScheduledUpdateGroupAction{},
 		)
 		deployer := internal.NewDeployer(config, NewMockAwsClient(state), logger)
-
 		assert.Success(t, deployer.MoveScheduledActions(ctx, "fromASG", "toASG"))
-
 		assert.Equal(t, len(state.GetAutoScalingGroup("fromASG").ScheduledActions), 0)
-		assert.Equal(t, len(state.GetAutoScalingGroup("toASG").ScheduledActions), 1)
+		assert.Equal(t, len(state.GetAutoScalingGroup("toASG").ScheduledActions), len(scheduledActions))
 	})
 }
