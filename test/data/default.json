@@ -1,0 +1,14 @@
+{
+  "bundleBucket": "test-deploy-bundle",
+  "listenerRuleArn": "arn:aws:elasticloadbalancing:::listener-rule/app/test-listener/99999999/99999999",
+  "target": {
+    "blue": {
+      "autoScalingGroupName": "test-blue-asg",
+      "targetGroupArn": "arn:aws:elasticloadbalancing:::targetgroup/test-blue-tg/99999999"
+    },
+    "green": {
+      "autoScalingGroupName": "test-green-asg",
+      "targetGroupArn": "arn:aws:elasticloadbalancing:::targetgroup/test-green-tg/99999999"
+    }
+  }
+}
