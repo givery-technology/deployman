@@ -1,5 +1,6 @@
 # https://goreleaser.com/ci/actions/
 name: release
+
 on:
   push:
     tags:
@@ -9,7 +10,7 @@ permissions:
   contents: write
 
 jobs:
-  goreleaser:
+  release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
