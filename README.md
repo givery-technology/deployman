@@ -16,21 +16,24 @@ This CLI enables B/G deployments by manipulating ALB weighted target groups to c
 
 ### About bundle management
 This CLI has the ability to register and search for the respective application bundles in blue or green to achieve the above deployment. Bundles will be managed in S3 and configured as follows.
+And then, keeps up to 100 of the latest bundles.
 
-- S3 bucket/
-    - bundles/
-        - xxxxxxxxx.zip
-        - yyyyyyyyy.zip
-        - zzzzzzzzz.zip
-    - active_bundle_blue: Text file pointing to the application bundle file name for deployment in blue environment
-    - active_bundle_green: Text file pointing to the application bundle file name for deployment in green environment 
+```
+S3 bucket/
+    ┣ bundles/
+    ┃   ┣ xxxxxxxxx.zip
+    ┃   ┣ yyyyyyyyy.zip
+    ┃   ┗ zzzzzzzzz.zip
+    ┣ active_bundle_blue  -> Text file pointing to the bundle file name for deployment in blue env
+    ┗ active_bundle_green -> Text file pointing to the bundle file name for deployment in green env
+```
 
 # Install
 There are the following methods.
 
 ### 1. Download binary
 ```shell
-version=0.0.3 && wget https://github.com/givery-technology/deployman/releases/download/${version}/deployman_${version}_linux_amd64.zip -O deployman.zip && unzip deployman.zip deployman && rm deployman.zip
+version=x.x.x && wget https://github.com/givery-technology/deployman/releases/download/${version}/deployman_${version}_linux_amd64.zip -O deployman.zip && unzip deployman.zip deployman && rm deployman.zip
 ```
 
 ### 2. Compile from source
@@ -59,6 +62,13 @@ cd ./cmd/deployman && go build
       }
     }
     ```
+ 
+    | ATTRIBUTE                                   | REQUIRED | TYPE   | DESCRIPTION                                                   |
+    |---------------------------------------------|----------|--------|---------------------------------------------------------------|
+    | bundleBucket                                | true     | string | S3 bucket name for application bundles to be deployed.        |
+    | listenerRuleArn                             | true     | string | Rule ARN of the ALB listener to deploy to.                    |
+    | target.{blue or green}.autoScalingGroupName | true     | string | Name of the AutoScalingGroup for blue or green, respectively. |
+    | target.{blue or green}.targetGroupArn       | true     | string | ARN of the ALB's TargetGroup for blue or green, respectively. |
 
 # Usage
 ### commands
