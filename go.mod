@@ -4,12 +4,12 @@ go 1.19
 
 require (
 	github.com/alecthomas/kingpin v2.2.6+incompatible
-	github.com/aws/aws-sdk-go-v2 v1.16.14
+	github.com/aws/aws-sdk-go-v2 v1.17.1
 	github.com/aws/aws-sdk-go-v2/config v1.17.5
 	github.com/aws/aws-sdk-go-v2/service/autoscaling v1.23.14
 	github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2 v1.18.17
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.27.9
-	github.com/aws/smithy-go v1.13.2
+	github.com/aws/smithy-go v1.13.4
 	github.com/go-playground/validator/v10 v10.11.0
 	github.com/olekukonko/tablewriter v0.0.5
 	github.com/pkg/errors v0.9.1
