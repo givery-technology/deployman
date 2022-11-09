@@ -32,12 +32,12 @@ type BundleInfo struct {
 	LastModified *time.Time
 }
 
-func NewBundler(deployConfig *Config, awsClient AwsClient, logger Logger) (*Bundler, error) {
+func NewBundler(deployConfig *Config, awsClient AwsClient, logger Logger) *Bundler {
 	return &Bundler{
 		config: deployConfig,
 		client: awsClient,
 		logger: logger,
-	}, nil
+	}
 }
 
 func (b *Bundler) listBundles(ctx context.Context, bucket string) ([]s3Types.Object, error) {
@@ -118,7 +118,7 @@ func (b *Bundler) Register(ctx context.Context, uploadFile string, bundleName st
 		var apiErr smithy.APIError
 		if err != nil {
 			if errors.As(err, &apiErr) && apiErr.ErrorCode() == "NotFound" {
-				if err := b.client.CreateS3Bucket(ctx, b.config.BundleBucket, b.client.Region()); err != nil {
+				if err := b.client.CreateS3Bucket(ctx, b.config.BundleBucket, b.client.GetRegion()); err != nil {
 					return err
 				}
 				if err := b.client.EnableS3BucketVersioning(ctx, b.config.BundleBucket); err != nil {

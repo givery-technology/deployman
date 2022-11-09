@@ -105,14 +105,7 @@ func main() {
 	}
 
 	deployer := internal.NewDeployer(deployConfig, awsClient, logger)
-	if err != nil {
-		logger.Fatal("🚨 Command Failure", err)
-	}
-
-	bundler, err := internal.NewBundler(deployConfig, awsClient, logger)
-	if err != nil {
-		logger.Fatal("🚨 Command Failure", err)
-	}
+	bundler := internal.NewBundler(deployConfig, awsClient, logger)
 
 	switch command {
 	case bundleRegister.FullCommand():

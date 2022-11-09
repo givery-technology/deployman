@@ -65,7 +65,7 @@ func (d *Deployer) getHealthInfo(ctx context.Context, targetGroupArn string) (*H
 	}
 
 	countBy := func(state albTypes.TargetHealthStateEnum) int {
-		return Count(&health, func(desc *albTypes.TargetHealthDescription) bool {
+		return Count(health, func(desc *albTypes.TargetHealthDescription) bool {
 			return desc.TargetHealth.State == state
 		})
 	}

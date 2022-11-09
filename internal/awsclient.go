@@ -16,7 +16,8 @@ import (
 )
 
 type AwsClient interface {
-	Region() string
+	GetRegion() string
+
 	ListS3BucketObjects(ctx context.Context, bucket string, prefix string) ([]s3Types.Object, error)
 	HeadS3Bucket(ctx context.Context, bucket string) error
 	CreateS3Bucket(ctx context.Context, bucket string, region string) error
@@ -62,7 +63,7 @@ func NewDefaultAwsClient(ctx context.Context) (*DefaultAwsClient, error) {
 	}, nil
 }
 
-func (c *DefaultAwsClient) Region() string {
+func (c *DefaultAwsClient) GetRegion() string {
 	return c.region
 }
 
