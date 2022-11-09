@@ -92,33 +92,6 @@ func TestE2E(t *testing.T) {
 		assert.Equal(t, *state.GetAutoScalingGroup(config.Target.Green.AutoScalingGroupName).MaxSize, int32(2))
 	})
 
-	t.Run("EC2Deploy", func(t *testing.T) {
-		state := NewTestingState(config).
-			WithLoadBalancer(
-				BlueWeight(0), BlueHealthStates{albTypes.TargetHealthStateEnumHealthy},
-				GreenWeight(100), GreenHealthStates{albTypes.TargetHealthStateEnumHealthy},
-			).
-			WithAutoScalingGroups(
-				BlueDesiredCapacity(0), BlueMinSize(0), BlueMaxSize(2), BlueInstanceStates{},
-				GreenDesiredCapacity(1), GreenMinSize(1), GreenMaxSize(2), GreenInstanceStates{asgTypes.LifecycleStateInService},
-			)
-		deployer := internal.NewDeployer(config, NewMockAwsClient(state), logger)
-
-		assert.Success(t, deployer.Deploy(ctx, true, true, true, aws.Duration(time.Duration(1))))
-
-		assert.Equal(t, *state.LoadBalancer.GetTargetGroup(config.Target.Blue.TargetGroupArn).Weight, int32(100))
-		assert.Equal(t, *state.LoadBalancer.GetTargetGroup(config.Target.Green.TargetGroupArn).Weight, int32(0))
-
-		assert.Equal(t, *state.GetAutoScalingGroup(config.Target.Blue.AutoScalingGroupName).DesiredCapacity, int32(1))
-		assert.Equal(t, *state.GetAutoScalingGroup(config.Target.Green.AutoScalingGroupName).DesiredCapacity, int32(1))
-
-		assert.Equal(t, *state.GetAutoScalingGroup(config.Target.Blue.AutoScalingGroupName).MinSize, int32(1))
-		assert.Equal(t, *state.GetAutoScalingGroup(config.Target.Green.AutoScalingGroupName).MinSize, int32(0))
-
-		assert.Equal(t, *state.GetAutoScalingGroup(config.Target.Blue.AutoScalingGroupName).MaxSize, int32(2))
-		assert.Equal(t, *state.GetAutoScalingGroup(config.Target.Green.AutoScalingGroupName).MaxSize, int32(2))
-	})
-
 	t.Run("EC2Rollback", func(t *testing.T) {
 		state := NewTestingState(config).
 			WithLoadBalancer(
