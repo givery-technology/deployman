@@ -22,9 +22,8 @@ type MockAwsClient struct {
 	State *TestingState
 }
 
-func (c *MockAwsClient) WithState(state *TestingState) *MockAwsClient {
-	c.State = state
-	return c
+func NewMockAwsClient(state *TestingState) *MockAwsClient {
+	return &MockAwsClient{State: state}
 }
 
 func (c *MockAwsClient) Region() string {
