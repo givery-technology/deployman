@@ -94,7 +94,7 @@ func (b *Bundler) ListBundles(ctx context.Context) error {
 		if len(targets) > 0 {
 			status = "active:[" + strings.Join(targets, ", ") + "]"
 		}
-		location := b.config.TimeZone.GetLocation()
+		location := b.config.TimeZone.CurrentLocation()
 		data = append(data, []string{
 			strconv.Itoa(i + 1),
 			bundleObject.LastModified.In(location).Format(time.RFC3339),
@@ -118,7 +118,7 @@ func (b *Bundler) Register(ctx context.Context, uploadFile string, bundleName st
 		var apiErr smithy.APIError
 		if err != nil {
 			if errors.As(err, &apiErr) && apiErr.ErrorCode() == "NotFound" {
-				if err := b.client.CreateS3Bucket(ctx, b.config.BundleBucket, b.client.GetRegion()); err != nil {
+				if err := b.client.CreateS3Bucket(ctx, b.config.BundleBucket, b.client.Region()); err != nil {
 					return err
 				}
 				if err := b.client.EnableS3BucketVersioning(ctx, b.config.BundleBucket); err != nil {

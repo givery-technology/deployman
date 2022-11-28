@@ -9,6 +9,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/autoscaling v1.24.0
 	github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2 v1.18.22
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.29.1
+	github.com/aws/aws-sdk-go-v2/service/ssm v1.33.1
 	github.com/aws/smithy-go v1.13.4
 	github.com/go-playground/validator/v10 v10.11.0
 	github.com/olekukonko/tablewriter v0.0.5

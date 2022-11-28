@@ -1,10 +1,12 @@
 package internal
 
 import (
+	"context"
 	"encoding/json"
 	"github.com/go-playground/validator/v10"
 	"github.com/pkg/errors"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -38,7 +40,7 @@ type TimeZone struct {
 
 var location *time.Location
 
-func (t *TimeZone) GetLocation() *time.Location {
+func (t *TimeZone) CurrentLocation() *time.Location {
 	if location != nil {
 		return location
 	}
@@ -46,7 +48,7 @@ func (t *TimeZone) GetLocation() *time.Location {
 	return location
 }
 
-func NewConfig(filename string) (*Config, error) {
+func NewConfig(ctx context.Context, awsClient AwsClient, filepath string) (*Config, error) {
 	config := &Config{
 		RetryPolicy: &RetryPolicy{
 			MaxLimit:        120,
@@ -58,19 +60,29 @@ func NewConfig(filename string) (*Config, error) {
 		},
 	}
 
-	raw, err := os.ReadFile(filename)
-	if err != nil {
-		return nil, errors.Wrap(err, "ConfigReadError")
+	var raw []byte
+	if strings.HasPrefix(filepath, "ssm:") {
+		ssmParameterName := strings.TrimLeft(filepath, "ssm:")
+		parameter, err := awsClient.GetSSMParameter(ctx, ssmParameterName, false)
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+		raw = []byte(*parameter.Value)
+	} else {
+		file, err := os.ReadFile(filepath)
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+		raw = file
 	}
 
 	if err := json.Unmarshal(raw, &config); err != nil {
-		return nil, errors.Wrap(err, "ConfigParseError")
+		return nil, errors.WithStack(err)
 	}
 
-	validate := validator.New()
-	err = validate.Struct(config)
+	err := validator.New().Struct(config)
 	if err != nil {
-		return nil, errors.Wrap(err, "ConfigValidationError")
+		return nil, errors.WithStack(err)
 	}
 
 	return config, nil

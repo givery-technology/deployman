@@ -17,14 +17,15 @@ const testdata = "./data"
 func TestE2E(t *testing.T) {
 	ctx := context.TODO()
 	logger := &internal.DefaultLogger{Verbose: true}
-	config, err := internal.NewConfig(testdata + "/default.json")
+	client := new(MockAwsClient)
+	config, err := internal.NewConfig(ctx, client, testdata+"/default.json")
 	if err != nil {
 		t.Fatal("InvalidConfig", err)
 	}
 
 	t.Run("BundleRegister#IfNoBucket", func(t *testing.T) {
 		state := NewTestingState(config)
-		bundler := internal.NewBundler(config, NewMockAwsClient(state), logger)
+		bundler := internal.NewBundler(config, client.WithState(state), logger)
 		assert.Success(t, bundler.Register(ctx, testdata+"/bundle.zip", "bundle.zip"))
 		assert.True(t, len(*state.Bucket.Name) >= 0)
 		assert.True(t, *state.Bucket.IsPublicAccessDisabled)
@@ -35,7 +36,7 @@ func TestE2E(t *testing.T) {
 
 	t.Run("BundleRegister#101Cycle", func(t *testing.T) {
 		state := NewTestingState(config)
-		bundler := internal.NewBundler(config, NewMockAwsClient(state), logger)
+		bundler := internal.NewBundler(config, client.WithState(state), logger)
 		for i := 0; i < 101; i++ {
 			assert.Success(t, bundler.Register(ctx, testdata+"/bundle.zip", "bundle.zip"))
 		}
@@ -44,7 +45,7 @@ func TestE2E(t *testing.T) {
 
 	t.Run("BundleRegister#ActivationAndDownload", func(t *testing.T) {
 		state := NewTestingState(config)
-		bundler := internal.NewBundler(config, NewMockAwsClient(state), logger)
+		bundler := internal.NewBundler(config, client.WithState(state), logger)
 		bundleName := "bundle.zip"
 
 		assert.Success(t, bundler.Register(ctx, testdata+"/bundle.zip", bundleName))
@@ -75,21 +76,21 @@ func TestE2E(t *testing.T) {
 				BlueDesiredCapacity(0), BlueMinSize(0), BlueMaxSize(2), BlueInstanceStates{},
 				GreenDesiredCapacity(1), GreenMinSize(1), GreenMaxSize(2), GreenInstanceStates{asgTypes.LifecycleStateInService},
 			)
-		deployer := internal.NewDeployer(config, NewMockAwsClient(state), logger)
+		deployer := internal.NewDeployer(config, client.WithState(state), logger)
 
 		assert.Success(t, deployer.Deploy(ctx, true, true, true, aws.Duration(time.Duration(1))))
 
-		assert.Equal(t, *state.LoadBalancer.GetTargetGroup(config.Target.Blue.TargetGroupArn).Weight, int32(100))
-		assert.Equal(t, *state.LoadBalancer.GetTargetGroup(config.Target.Green.TargetGroupArn).Weight, int32(0))
+		assert.Equal(t, *state.LoadBalancer.FindTargetGroup(config.Target.Blue.TargetGroupArn).Weight, int32(100))
+		assert.Equal(t, *state.LoadBalancer.FindTargetGroup(config.Target.Green.TargetGroupArn).Weight, int32(0))
 
-		assert.Equal(t, *state.GetAutoScalingGroup(config.Target.Blue.AutoScalingGroupName).DesiredCapacity, int32(1))
-		assert.Equal(t, *state.GetAutoScalingGroup(config.Target.Green.AutoScalingGroupName).DesiredCapacity, int32(1))
+		assert.Equal(t, *state.FindAutoScalingGroup(config.Target.Blue.AutoScalingGroupName).DesiredCapacity, int32(1))
+		assert.Equal(t, *state.FindAutoScalingGroup(config.Target.Green.AutoScalingGroupName).DesiredCapacity, int32(1))
 
-		assert.Equal(t, *state.GetAutoScalingGroup(config.Target.Blue.AutoScalingGroupName).MinSize, int32(1))
-		assert.Equal(t, *state.GetAutoScalingGroup(config.Target.Green.AutoScalingGroupName).MinSize, int32(0))
+		assert.Equal(t, *state.FindAutoScalingGroup(config.Target.Blue.AutoScalingGroupName).MinSize, int32(1))
+		assert.Equal(t, *state.FindAutoScalingGroup(config.Target.Green.AutoScalingGroupName).MinSize, int32(0))
 
-		assert.Equal(t, *state.GetAutoScalingGroup(config.Target.Blue.AutoScalingGroupName).MaxSize, int32(2))
-		assert.Equal(t, *state.GetAutoScalingGroup(config.Target.Green.AutoScalingGroupName).MaxSize, int32(2))
+		assert.Equal(t, *state.FindAutoScalingGroup(config.Target.Blue.AutoScalingGroupName).MaxSize, int32(2))
+		assert.Equal(t, *state.FindAutoScalingGroup(config.Target.Green.AutoScalingGroupName).MaxSize, int32(2))
 	})
 
 	t.Run("EC2Rollback", func(t *testing.T) {
@@ -102,21 +103,21 @@ func TestE2E(t *testing.T) {
 				BlueDesiredCapacity(0), BlueMinSize(0), BlueMaxSize(2), BlueInstanceStates{},
 				GreenDesiredCapacity(1), GreenMinSize(1), GreenMaxSize(2), GreenInstanceStates{asgTypes.LifecycleStateInService},
 			)
-		deployer := internal.NewDeployer(config, NewMockAwsClient(state), logger)
+		deployer := internal.NewDeployer(config, client.WithState(state), logger)
 
 		assert.Success(t, deployer.Deploy(ctx, true, false, false, aws.Duration(time.Duration(1))))
 
-		assert.Equal(t, *state.LoadBalancer.GetTargetGroup(config.Target.Blue.TargetGroupArn).Weight, int32(100))
-		assert.Equal(t, *state.LoadBalancer.GetTargetGroup(config.Target.Green.TargetGroupArn).Weight, int32(0))
+		assert.Equal(t, *state.LoadBalancer.FindTargetGroup(config.Target.Blue.TargetGroupArn).Weight, int32(100))
+		assert.Equal(t, *state.LoadBalancer.FindTargetGroup(config.Target.Green.TargetGroupArn).Weight, int32(0))
 
-		assert.Equal(t, *state.GetAutoScalingGroup(config.Target.Blue.AutoScalingGroupName).DesiredCapacity, int32(1))
-		assert.Equal(t, *state.GetAutoScalingGroup(config.Target.Green.AutoScalingGroupName).DesiredCapacity, int32(1))
+		assert.Equal(t, *state.FindAutoScalingGroup(config.Target.Blue.AutoScalingGroupName).DesiredCapacity, int32(1))
+		assert.Equal(t, *state.FindAutoScalingGroup(config.Target.Green.AutoScalingGroupName).DesiredCapacity, int32(1))
 
-		assert.Equal(t, *state.GetAutoScalingGroup(config.Target.Blue.AutoScalingGroupName).MinSize, int32(1))
-		assert.Equal(t, *state.GetAutoScalingGroup(config.Target.Green.AutoScalingGroupName).MinSize, int32(1))
+		assert.Equal(t, *state.FindAutoScalingGroup(config.Target.Blue.AutoScalingGroupName).MinSize, int32(1))
+		assert.Equal(t, *state.FindAutoScalingGroup(config.Target.Green.AutoScalingGroupName).MinSize, int32(1))
 
-		assert.Equal(t, *state.GetAutoScalingGroup(config.Target.Blue.AutoScalingGroupName).MaxSize, int32(2))
-		assert.Equal(t, *state.GetAutoScalingGroup(config.Target.Green.AutoScalingGroupName).MaxSize, int32(2))
+		assert.Equal(t, *state.FindAutoScalingGroup(config.Target.Blue.AutoScalingGroupName).MaxSize, int32(2))
+		assert.Equal(t, *state.FindAutoScalingGroup(config.Target.Green.AutoScalingGroupName).MaxSize, int32(2))
 	})
 
 	t.Run("EC2AutoScalingGroupByTarget", func(t *testing.T) {
@@ -129,19 +130,19 @@ func TestE2E(t *testing.T) {
 				BlueDesiredCapacity(0), BlueMinSize(0), BlueMaxSize(2), BlueInstanceStates{},
 				GreenDesiredCapacity(1), GreenMinSize(1), GreenMaxSize(2), GreenInstanceStates{asgTypes.LifecycleStateInService},
 			)
-		deployer := internal.NewDeployer(config, NewMockAwsClient(state), logger)
+		deployer := internal.NewDeployer(config, client.WithState(state), logger)
 
 		assert.Success(t, deployer.UpdateAutoScalingGroupByTarget(ctx, internal.BlueTargetType, aws.Int32(11), aws.Int32(12), aws.Int32(13)))
 
-		assert.Equal(t, *state.GetAutoScalingGroup(config.Target.Blue.AutoScalingGroupName).DesiredCapacity, int32(11))
-		assert.Equal(t, *state.GetAutoScalingGroup(config.Target.Blue.AutoScalingGroupName).MinSize, int32(12))
-		assert.Equal(t, *state.GetAutoScalingGroup(config.Target.Blue.AutoScalingGroupName).MaxSize, int32(13))
+		assert.Equal(t, *state.FindAutoScalingGroup(config.Target.Blue.AutoScalingGroupName).DesiredCapacity, int32(11))
+		assert.Equal(t, *state.FindAutoScalingGroup(config.Target.Blue.AutoScalingGroupName).MinSize, int32(12))
+		assert.Equal(t, *state.FindAutoScalingGroup(config.Target.Blue.AutoScalingGroupName).MaxSize, int32(13))
 
 		assert.Success(t, deployer.UpdateAutoScalingGroupByTarget(ctx, internal.GreenTargetType, aws.Int32(21), aws.Int32(22), aws.Int32(23)))
 
-		assert.Equal(t, *state.GetAutoScalingGroup(config.Target.Green.AutoScalingGroupName).DesiredCapacity, int32(21))
-		assert.Equal(t, *state.GetAutoScalingGroup(config.Target.Green.AutoScalingGroupName).MinSize, int32(22))
-		assert.Equal(t, *state.GetAutoScalingGroup(config.Target.Green.AutoScalingGroupName).MaxSize, int32(23))
+		assert.Equal(t, *state.FindAutoScalingGroup(config.Target.Green.AutoScalingGroupName).DesiredCapacity, int32(21))
+		assert.Equal(t, *state.FindAutoScalingGroup(config.Target.Green.AutoScalingGroupName).MinSize, int32(22))
+		assert.Equal(t, *state.FindAutoScalingGroup(config.Target.Green.AutoScalingGroupName).MaxSize, int32(23))
 	})
 
 	t.Run("EC2MoveScheduledAction", func(t *testing.T) {
@@ -176,9 +177,9 @@ func TestE2E(t *testing.T) {
 			"fromASG", scheduledActions,
 			"toASG", []asgTypes.ScheduledUpdateGroupAction{},
 		)
-		deployer := internal.NewDeployer(config, NewMockAwsClient(state), logger)
+		deployer := internal.NewDeployer(config, client.WithState(state), logger)
 		assert.Success(t, deployer.MoveScheduledActions(ctx, "fromASG", "toASG"))
-		assert.Equal(t, len(state.GetAutoScalingGroup("fromASG").ScheduledActions), 0)
-		assert.Equal(t, len(state.GetAutoScalingGroup("toASG").ScheduledActions), len(scheduledActions))
+		assert.Equal(t, len(state.FindAutoScalingGroup("fromASG").ScheduledActions), 0)
+		assert.Equal(t, len(state.FindAutoScalingGroup("toASG").ScheduledActions), len(scheduledActions))
 	})
 }
