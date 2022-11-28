@@ -10,13 +10,15 @@ import (
 	albTypes "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3Types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/aws-sdk-go-v2/service/ssm"
+	ssmTypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
 	"github.com/pkg/errors"
 	"os"
 	"strings"
 )
 
 type AwsClient interface {
-	GetRegion() string
+	Region() string
 
 	ListS3BucketObjects(ctx context.Context, bucket string, prefix string) ([]s3Types.Object, error)
 	HeadS3Bucket(ctx context.Context, bucket string) error
@@ -39,12 +41,14 @@ type AwsClient interface {
 	DescribeScheduledActions(ctx context.Context, name string) ([]asgTypes.ScheduledUpdateGroupAction, error)
 	PutScheduledUpdateGroupAction(ctx context.Context, name string, action *asgTypes.ScheduledUpdateGroupAction) error
 	DeleteScheduledAction(ctx context.Context, autoScalingGroupName string, scheduledActionName string) error
+	GetSSMParameter(ctx context.Context, name string, withDecription bool) (*ssmTypes.Parameter, error)
 }
 
 type DefaultAwsClient struct {
 	asg    *asg.Client
 	alb    *alb.Client
 	s3     *s3.Client
+	ssm    *ssm.Client
 	region string
 }
 
@@ -59,11 +63,12 @@ func NewDefaultAwsClient(ctx context.Context) (*DefaultAwsClient, error) {
 		asg:    asg.NewFromConfig(config),
 		alb:    alb.NewFromConfig(config),
 		s3:     s3.NewFromConfig(config),
+		ssm:    ssm.NewFromConfig(config),
 		region: region,
 	}, nil
 }
 
-func (c *DefaultAwsClient) GetRegion() string {
+func (c *DefaultAwsClient) Region() string {
 	return c.region
 }
 
@@ -315,4 +320,16 @@ func (c *DefaultAwsClient) DeleteScheduledAction(ctx context.Context, autoScalin
 	}
 
 	return nil
+}
+
+func (c *DefaultAwsClient) GetSSMParameter(ctx context.Context, name string, withDecription bool) (*ssmTypes.Parameter, error) {
+	output, err := c.ssm.GetParameter(ctx, &ssm.GetParameterInput{
+		Name:           aws.String(name),
+		WithDecryption: aws.Bool(withDecription),
+	})
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	return output.Parameter, nil
 }

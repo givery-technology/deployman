@@ -99,7 +99,7 @@ func main() {
 		logger.Fatal("🚨 Command Failure", err)
 	}
 
-	deployConfig, err := internal.NewConfig(*config)
+	deployConfig, err := internal.NewConfig(ctx, awsClient, *config)
 	if err != nil {
 		logger.Fatal("🚨 Command Failure", err)
 	}

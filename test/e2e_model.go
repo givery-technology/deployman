@@ -10,7 +10,8 @@ import (
 )
 
 type TestingState struct {
-	config            *internal.Config
+	config *internal.Config
+
 	Bucket            *TestingBucket
 	LoadBalancer      *TestingLoadBalancer
 	AutoScalingGroups []TestingAutoScalingGroup
@@ -20,8 +21,8 @@ func NewTestingState(config *internal.Config) *TestingState {
 	return &TestingState{config: config}
 }
 
-func (t *TestingState) GetAutoScalingGroup(name string) *TestingAutoScalingGroup {
-	return internal.FirstOrDefault(t.AutoScalingGroups, func(g *TestingAutoScalingGroup) bool {
+func (s *TestingState) FindAutoScalingGroup(name string) *TestingAutoScalingGroup {
+	return internal.FirstOrDefault(s.AutoScalingGroups, func(g *TestingAutoScalingGroup) bool {
 		return *g.AutoScalingGroupName == name
 	})
 }
@@ -47,7 +48,7 @@ type TestingLoadBalancer struct {
 	ForwardActionStickness *albTypes.TargetGroupStickinessConfig
 }
 
-func (t *TestingLoadBalancer) GetTargetGroup(targetGroupArn string) *TestingTargetGroup {
+func (t *TestingLoadBalancer) FindTargetGroup(targetGroupArn string) *TestingTargetGroup {
 	return internal.FirstOrDefault(t.TargetGroups, func(tg *TestingTargetGroup) bool {
 		return *tg.TargetGroupArn == targetGroupArn
 	})
@@ -64,15 +65,15 @@ type TestingAutoScalingGroup struct {
 	ScheduledActions []asgTypes.ScheduledUpdateGroupAction
 }
 
-func (t *TestingState) WithBucket(config *internal.Config) *TestingState {
-	t.Bucket = &TestingBucket{
+func (s *TestingState) WithBucket(config *internal.Config) *TestingState {
+	s.Bucket = &TestingBucket{
 		Name:                   aws.String(config.BundleBucket),
 		IsVersioningEnabled:    aws.Bool(false),
 		IsAclPrivated:          aws.Bool(false),
 		IsPublicAccessDisabled: aws.Bool(false),
 		Objects:                []TestingBucketObject{},
 	}
-	return t
+	return s
 }
 
 type (
@@ -82,18 +83,18 @@ type (
 	GreenHealthStates []albTypes.TargetHealthStateEnum
 )
 
-func (t *TestingState) WithLoadBalancer(
+func (s *TestingState) WithLoadBalancer(
 	blueWeight BlueWeight,
 	blueStates BlueHealthStates,
 	greenWeight GreenWeight,
 	greenStates GreenHealthStates,
 ) *TestingState {
-	t.LoadBalancer = &TestingLoadBalancer{
-		ListenerRuleArn: aws.String(t.config.ListenerRuleArn),
+	s.LoadBalancer = &TestingLoadBalancer{
+		ListenerRuleArn: aws.String(s.config.ListenerRuleArn),
 		TargetGroups: []TestingTargetGroup{
 			{
 				TargetGroupTuple: &albTypes.TargetGroupTuple{
-					TargetGroupArn: aws.String(t.config.Target.Blue.TargetGroupArn),
+					TargetGroupArn: aws.String(s.config.Target.Blue.TargetGroupArn),
 					Weight:         aws.Int32(int32(blueWeight)),
 				},
 				TargetGroupName: aws.String(string(internal.BlueTargetType)),
@@ -101,7 +102,7 @@ func (t *TestingState) WithLoadBalancer(
 			},
 			{
 				TargetGroupTuple: &albTypes.TargetGroupTuple{
-					TargetGroupArn: aws.String(t.config.Target.Green.TargetGroupArn),
+					TargetGroupArn: aws.String(s.config.Target.Green.TargetGroupArn),
 					Weight:         aws.Int32(int32(greenWeight)),
 				},
 				TargetGroupName: aws.String(string(internal.GreenTargetType)),
@@ -113,7 +114,7 @@ func (t *TestingState) WithLoadBalancer(
 			Enabled:         aws.Bool(true),
 		},
 	}
-	return t
+	return s
 }
 
 type (
@@ -127,7 +128,7 @@ type (
 	GreenInstanceStates  []asgTypes.LifecycleState
 )
 
-func (t *TestingState) WithAutoScalingGroups(
+func (s *TestingState) WithAutoScalingGroups(
 	blueDesiredCapacity BlueDesiredCapacity,
 	blueMinSize BlueMinSize,
 	blueMaxSize BlueMaxSize,
@@ -137,10 +138,10 @@ func (t *TestingState) WithAutoScalingGroups(
 	greenMaxSize GreenMaxSize,
 	greenStates GreenInstanceStates,
 ) *TestingState {
-	t.AutoScalingGroups = []TestingAutoScalingGroup{
+	s.AutoScalingGroups = []TestingAutoScalingGroup{
 		{
 			AutoScalingGroup: &asgTypes.AutoScalingGroup{
-				AutoScalingGroupName: aws.String(t.config.Target.Blue.AutoScalingGroupName),
+				AutoScalingGroupName: aws.String(s.config.Target.Blue.AutoScalingGroupName),
 				DesiredCapacity:      aws.Int32(int32(blueDesiredCapacity)),
 				MinSize:              aws.Int32(int32(blueMinSize)),
 				MaxSize:              aws.Int32(int32(blueMaxSize)),
@@ -150,13 +151,13 @@ func (t *TestingState) WithAutoScalingGroups(
 						LifecycleState: *state,
 					}
 				}),
-				TargetGroupARNs: []string{t.config.Target.Blue.TargetGroupArn},
+				TargetGroupARNs: []string{s.config.Target.Blue.TargetGroupArn},
 			},
 			ScheduledActions: []asgTypes.ScheduledUpdateGroupAction{},
 		},
 		{
 			AutoScalingGroup: &asgTypes.AutoScalingGroup{
-				AutoScalingGroupName: aws.String(t.config.Target.Green.AutoScalingGroupName),
+				AutoScalingGroupName: aws.String(s.config.Target.Green.AutoScalingGroupName),
 				DesiredCapacity:      aws.Int32(int32(greenDesiredCapacity)),
 				MinSize:              aws.Int32(int32(greenMinSize)),
 				MaxSize:              aws.Int32(int32(greenMaxSize)),
@@ -166,21 +167,21 @@ func (t *TestingState) WithAutoScalingGroups(
 						LifecycleState: *state,
 					}
 				}),
-				TargetGroupARNs: []string{t.config.Target.Blue.TargetGroupArn},
+				TargetGroupARNs: []string{s.config.Target.Blue.TargetGroupArn},
 			},
 			ScheduledActions: []asgTypes.ScheduledUpdateGroupAction{},
 		},
 	}
-	return t
+	return s
 }
 
-func (t *TestingState) WithAutoScalingGroupScheduledAction(
+func (s *TestingState) WithAutoScalingGroupScheduledAction(
 	blueAutoScalingGroupName string,
 	blueScheduledActions []asgTypes.ScheduledUpdateGroupAction,
 	greenAutoScalingGroupName string,
 	greenScheduledACtions []asgTypes.ScheduledUpdateGroupAction,
 ) *TestingState {
-	t.AutoScalingGroups = []TestingAutoScalingGroup{
+	s.AutoScalingGroups = []TestingAutoScalingGroup{
 		{
 			AutoScalingGroup: &asgTypes.AutoScalingGroup{
 				AutoScalingGroupName: aws.String(blueAutoScalingGroupName),
@@ -194,5 +195,5 @@ func (t *TestingState) WithAutoScalingGroupScheduledAction(
 			ScheduledActions: greenScheduledACtions,
 		},
 	}
-	return t
+	return s
 }
