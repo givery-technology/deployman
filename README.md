@@ -33,7 +33,9 @@ There are the following methods.
 
 ### 1. Download binary
 ```shell
-version=x.x.x && wget https://github.com/givery-technology/deployman/releases/download/${version}/deployman_${version}_linux_amd64.zip -O deployman.zip && unzip deployman.zip deployman && rm deployman.zip
+version=x.x.x
+arch=darwin_arm64
+wget https://github.com/givery-technology/deployman/releases/download/${version}/deployman_${version}_${arch}.zip -O deployman.zip && unzip deployman.zip deployman && rm deployman.zip
 ```
 
 ### 2. Compile from source
