@@ -156,7 +156,7 @@ Flags:
 ```
 - output sample: This example shows that the bundle deployed in blue-AutoScalingGroup is #1 and the bundle deployed in green-AutoScaling is #2.
     ```shell
-    Bucket: orca-deploy-bundle-dev
+    Bucket: some-deploy-bundle-dev
     +----+---------------------------+-----------------------------+----------------+
     | #  |       LAST UPDATED        |         BUNDLE NAME         |     STATUS     |
     +----+---------------------------+-----------------------------+----------------+
