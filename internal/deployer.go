@@ -295,7 +295,7 @@ func (d *Deployer) Deploy(
 	d.logger.Info(fmt.Sprintf("Start '%s' health check.", info.IdlingTarget.Type))
 	err = d.HealthCheck(ctx,
 		*info.IdlingTarget.TargetGroup.TargetGroupArn,
-		int(*info.RunningTarget.AutoScalingGroup.DesiredCapacity))
+		*info.IdlingTarget.AutoScalingGroup.AutoScalingGroupName)
 	if err != nil {
 		if errors.Is(err, RetryTimeout) {
 			d.logger.Error("Health check timed out. Initiating a rollback as the process cannot continue.", nil)
@@ -349,7 +349,7 @@ func (d *Deployer) Deploy(
 	return nil
 }
 
-func (d *Deployer) HealthCheck(ctx context.Context, targetGroupArn string, desiredCount int) error {
+func (d *Deployer) HealthCheck(ctx context.Context, targetGroupArn string, autoScalingGroupName string) error {
 	maxLimit := d.config.RetryPolicy.MaxLimit
 	interval := aws.Duration(time.Duration(d.config.RetryPolicy.IntervalSeconds) * time.Second)
 	return NewFixedIntervalRetryer(maxLimit, interval).Start(
@@ -359,6 +359,12 @@ func (d *Deployer) HealthCheck(ctx context.Context, targetGroupArn string, desir
 				return FinishRetry, err
 			}
 
+			autoScalingGroup, err := d.client.DescribeAutoScalingGroup(ctx, autoScalingGroupName)
+			if err != nil {
+				return FinishRetry, err
+			}
+
+			desiredCount := int(*autoScalingGroup.DesiredCapacity)
 			if health.HealthyCount >= desiredCount {
 				return FinishRetry, nil
 			}
