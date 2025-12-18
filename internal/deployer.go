@@ -85,11 +85,7 @@ func (d *Deployer) getHealthInfo(ctx context.Context, targetGroupArn string) (*H
 func (d *Deployer) lifecycleStateToString(autoScalingGroup *asgTypes.AutoScalingGroup) string {
 	lifecycleStates := map[asgTypes.LifecycleState]int{}
 	for _, ins := range autoScalingGroup.Instances {
-		if _, ok := lifecycleStates[ins.LifecycleState]; ok {
-			lifecycleStates[ins.LifecycleState]++
-		} else {
-			lifecycleStates[ins.LifecycleState] = 1
-		}
+		lifecycleStates[ins.LifecycleState]++
 	}
 	var states []string
 	for state, count := range lifecycleStates {
@@ -106,11 +102,12 @@ func (d *Deployer) GetDeployTarget(
 	ctx context.Context, rule *albTypes.Rule, targetType TargetType) (*DeployTarget, error) {
 
 	var target *Target
-	if targetType == BlueTargetType {
+	switch targetType {
+	case BlueTargetType:
 		target = d.config.Target.Blue
-	} else if targetType == GreenTargetType {
+	case GreenTargetType:
 		target = d.config.Target.Green
-	} else {
+	default:
 		return nil, errors.Errorf("TargetType:'%s' does not exist.", string(targetType))
 	}
 
@@ -237,7 +234,7 @@ func (d *Deployer) ShowStatus(ctx context.Context) error {
 
 	data := [][]string{toData(blueTarget, blueTGName, blueHealth), toData(greenTarget, greenTGName, greenHealth)}
 	table := tablewriter.NewWriter(os.Stdout)
-	table.Header(
+	table.SetHeader([]string{
 		"target",
 		"traffic(%)",
 		"asg:name",
@@ -251,8 +248,9 @@ func (d *Deployer) ShowStatus(ctx context.Context) error {
 		"elb:unhealthy",
 		"elb:unused",
 		"elb:initial",
-		"elb:draining")
-	table.Bulk(data)
+		"elb:draining",
+	})
+	table.AppendBulk(data)
 	table.Render()
 
 	return nil

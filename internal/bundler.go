@@ -106,8 +106,8 @@ func (b *Bundler) ListBundles(ctx context.Context) error {
 
 	fmt.Printf("Bucket: %s\n", b.config.BundleBucket)
 	table := tablewriter.NewWriter(os.Stdout)
-	table.Header("#", "last updated", "bundle name", "status")
-	table.Bulk(data)
+	table.SetHeader([]string{"#", "last updated", "bundle name", "status"})
+	table.AppendBulk(data)
 	table.Render()
 
 	return nil
