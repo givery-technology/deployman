@@ -153,6 +153,7 @@ Flags:
   --help                       Show context-sensitive help (also try --help-long and --help-man).
   --config="./deployman.json"  [OPTIONAL] Configuration file path. By default, this value is './deployman.json'. If this file does not exist, an error will occur.
   --verbose                    [OPTIONAL] A detailed log containing call stacks will be error messages.
+  --output="table"             [OPTIONAL] Output format (table, json). Default is table.
 ```
 - output sample: This example shows that the bundle deployed in blue-AutoScalingGroup is #1 and the bundle deployed in green-AutoScaling is #2.
     ```shell
@@ -168,7 +169,7 @@ Flags:
     +----+---------------------------+-----------------------------+----------------+
     ```
 
-### bundle acrivate
+### bundle activate
 ```shell
 usage: deployman bundle activate --target=TARGET --name=NAME
 
@@ -205,6 +206,7 @@ Flags:
   --help                       Show context-sensitive help (also try --help-long and --help-man).
   --config="./deployman.json"  [OPTIONAL] Configuration file path. By default, this value is './deployman.json'. If this file does not exist, an error will occur.
   --verbose                    [OPTIONAL] A detailed log containing call stacks will be error messages.
+  --output="table"             [OPTIONAL] Output format (table, json). Default is table.
 ```
 - output sample: TARGET is a blue/green classification. It displays the percentage of each traffic weight and the status of the associated AutoScalingGroup and TargetGroup.
     ```shell

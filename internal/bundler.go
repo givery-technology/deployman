@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strconv"
@@ -35,10 +36,10 @@ type ActiveBundle struct {
 }
 
 type BundleListItem struct {
-	Number      int    `json:"number"`
-	LastUpdated string `json:"lastUpdated"`
-	BundleName  string `json:"bundleName"`
-	Status      string `json:"status"`
+	Number        int      `json:"number"`
+	LastUpdated   string   `json:"lastUpdated"`
+	BundleName    string   `json:"bundleName"`
+	ActiveTargets []string `json:"activeTargets"`
 }
 
 type BundleListOutput struct {
@@ -46,25 +47,29 @@ type BundleListOutput struct {
 	Bundles    []BundleListItem `json:"bundles"`
 }
 
-func (b *BundleListOutput) AsJSON() error {
-	encoder := json.NewEncoder(os.Stdout)
+func (b *BundleListOutput) AsJSON(w io.Writer) error {
+	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(b)
 }
 
-func (b *BundleListOutput) AsTable() error {
+func (b *BundleListOutput) AsTable(w io.Writer) error {
 	var data [][]string
 	for _, item := range b.Bundles {
+		status := ""
+		if len(item.ActiveTargets) > 0 {
+			status = "active:[" + strings.Join(item.ActiveTargets, ", ") + "]"
+		}
 		data = append(data, []string{
 			strconv.Itoa(item.Number),
 			item.LastUpdated,
 			item.BundleName,
-			item.Status,
+			status,
 		})
 	}
 
-	fmt.Printf("Bucket: %s\n", b.BucketName)
-	table := tablewriter.NewWriter(os.Stdout)
+	fmt.Fprintf(w, "Bucket: %s\n", b.BucketName)
+	table := tablewriter.NewWriter(w)
 	table.SetHeader([]string{"#", "last updated", "bundle name", "status"})
 	table.AppendBulk(data)
 	table.Render()
@@ -131,19 +136,15 @@ func (b *Bundler) ListBundles(ctx context.Context, outputFormat string) error {
 		if greenBundle != nil && strings.Contains(*bundleObject.Key, greenBundle.Value) {
 			targets = append(targets, "green")
 		}
-		status := ""
-		if len(targets) > 0 {
-			status = "active:[" + strings.Join(targets, ", ") + "]"
-		}
 		location := b.config.TimeZone.CurrentLocation()
 		lastUpdated := bundleObject.LastModified.In(location).Format(time.RFC3339)
 		bundleName := strings.Replace(*bundleObject.Key, BundlePrefix, "", 1)
 
 		bundles = append(bundles, BundleListItem{
-			Number:      i + 1,
-			LastUpdated: lastUpdated,
-			BundleName:  bundleName,
-			Status:      status,
+			Number:        i + 1,
+			LastUpdated:   lastUpdated,
+			BundleName:    bundleName,
+			ActiveTargets: targets,
 		})
 	}
 
@@ -153,9 +154,9 @@ func (b *Bundler) ListBundles(ctx context.Context, outputFormat string) error {
 	}
 
 	if outputFormat == "json" {
-		return output.AsJSON()
+		return output.AsJSON(os.Stdout)
 	}
-	return output.AsTable()
+	return output.AsTable(os.Stdout)
 }
 
 func (b *Bundler) Register(ctx context.Context, uploadFile string, bundleName string) error {

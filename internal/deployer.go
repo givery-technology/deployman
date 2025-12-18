@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -53,11 +54,49 @@ type HealthInfo struct {
 }
 
 type ASGStatus struct {
-	Name            string `json:"name"`
-	DesiredCapacity int32  `json:"desiredCapacity"`
-	MinSize         int32  `json:"minSize"`
-	MaxSize         int32  `json:"maxSize"`
-	LifecycleState  string `json:"lifecycleState"`
+	Name            string               `json:"name"`
+	DesiredCapacity int32                `json:"desiredCapacity"`
+	MinSize         int32                `json:"minSize"`
+	MaxSize         int32                `json:"maxSize"`
+	Lifecycles      []ASGLifeCycleStatus `json:"lifecycles"`
+}
+
+func newASGStatus(autoScalingGroup *asgTypes.AutoScalingGroup) *ASGStatus {
+	lifecycleStates := map[asgTypes.LifecycleState]int{}
+	for _, ins := range autoScalingGroup.Instances {
+		lifecycleStates[ins.LifecycleState]++
+	}
+	var states []ASGLifeCycleStatus
+	for state, count := range lifecycleStates {
+		states = append(states, ASGLifeCycleStatus{
+			Name:  string(state),
+			Count: count,
+		})
+	}
+	return &ASGStatus{
+		Name:            *autoScalingGroup.AutoScalingGroupName,
+		DesiredCapacity: *autoScalingGroup.DesiredCapacity,
+		MinSize:         *autoScalingGroup.MinSize,
+		MaxSize:         *autoScalingGroup.MaxSize,
+		Lifecycles:      states,
+	}
+}
+
+func (a *ASGStatus) StringLifecycles() string {
+	var parts []string
+	for _, lifecycle := range a.Lifecycles {
+		parts = append(parts, lifecycle.String())
+	}
+	return strings.Join(parts, ",")
+}
+
+type ASGLifeCycleStatus struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
+func (a *ASGLifeCycleStatus) String() string {
+	return fmt.Sprintf("%s:%d", a.Name, a.Count)
 }
 
 type ELBStatus struct {
@@ -81,13 +120,13 @@ type StatusOutput struct {
 	Targets []TargetStatus `json:"targets"`
 }
 
-func (s *StatusOutput) AsJSON() error {
-	encoder := json.NewEncoder(os.Stdout)
+func (s *StatusOutput) AsJSON(w io.Writer) error {
+	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(s)
 }
 
-func (s *StatusOutput) AsTable() error {
+func (s *StatusOutput) AsTable(w io.Writer) error {
 	var data [][]string
 	for _, target := range s.Targets {
 		data = append(data, []string{
@@ -97,7 +136,7 @@ func (s *StatusOutput) AsTable() error {
 			strconv.Itoa(int(target.AutoScalingGroup.DesiredCapacity)),
 			strconv.Itoa(int(target.AutoScalingGroup.MinSize)),
 			strconv.Itoa(int(target.AutoScalingGroup.MaxSize)),
-			target.AutoScalingGroup.LifecycleState,
+			target.AutoScalingGroup.StringLifecycles(),
 			target.LoadBalancer.TargetGroupName,
 			strconv.Itoa(target.LoadBalancer.Total),
 			strconv.Itoa(target.LoadBalancer.Healthy),
@@ -107,7 +146,7 @@ func (s *StatusOutput) AsTable() error {
 			strconv.Itoa(target.LoadBalancer.Draining),
 		})
 	}
-	table := tablewriter.NewWriter(os.Stdout)
+	table := tablewriter.NewWriter(w)
 	table.SetHeader([]string{
 		"target",
 		"traffic(%)",
@@ -158,22 +197,6 @@ func (d *Deployer) getHealthInfo(ctx context.Context, targetGroupArn string) (*H
 		InitialCount:   countBy(albTypes.TargetHealthStateEnumInitial),
 		DrainingCount:  countBy(albTypes.TargetHealthStateEnumDraining),
 	}, nil
-}
-
-func (d *Deployer) lifecycleStateToString(autoScalingGroup *asgTypes.AutoScalingGroup) string {
-	lifecycleStates := map[asgTypes.LifecycleState]int{}
-	for _, ins := range autoScalingGroup.Instances {
-		lifecycleStates[ins.LifecycleState]++
-	}
-	var states []string
-	for state, count := range lifecycleStates {
-		states = append(states, fmt.Sprintf("%s:%d", string(state), count))
-	}
-	result := ""
-	if len(states) > 0 {
-		result = strings.Join(states, ",")
-	}
-	return result
 }
 
 func (d *Deployer) GetDeployTarget(
@@ -293,15 +316,9 @@ func (d *Deployer) ShowStatus(ctx context.Context, outputFormat string) error {
 
 	toStatus := func(target *DeployTarget, targetGroupName string, health *HealthInfo) TargetStatus {
 		return TargetStatus{
-			TargetType:    string(target.Type),
-			TrafficWeight: *target.TargetGroup.Weight,
-			AutoScalingGroup: ASGStatus{
-				Name:            *target.AutoScalingGroup.AutoScalingGroupName,
-				DesiredCapacity: *target.AutoScalingGroup.DesiredCapacity,
-				MinSize:         *target.AutoScalingGroup.MinSize,
-				MaxSize:         *target.AutoScalingGroup.MaxSize,
-				LifecycleState:  d.lifecycleStateToString(target.AutoScalingGroup),
-			},
+			TargetType:       string(target.Type),
+			TrafficWeight:    *target.TargetGroup.Weight,
+			AutoScalingGroup: *newASGStatus(target.AutoScalingGroup),
 			LoadBalancer: ELBStatus{
 				TargetGroupName: targetGroupName,
 				Total:           health.TotalCount,
@@ -322,9 +339,9 @@ func (d *Deployer) ShowStatus(ctx context.Context, outputFormat string) error {
 	}
 
 	if outputFormat == "json" {
-		return output.AsJSON()
+		return output.AsJSON(os.Stdout)
 	}
-	return output.AsTable()
+	return output.AsTable(os.Stdout)
 }
 
 func (d *Deployer) Deploy(
@@ -570,7 +587,7 @@ func (d *Deployer) CleanupAutoScalingGroup(ctx context.Context, autoScalingGroup
 				*current.MinSize,
 				*current.MaxSize,
 				len(current.Instances),
-				d.lifecycleStateToString(current),
+				newASGStatus(current).StringLifecycles(),
 			))
 
 			return ContinueRetry, nil
