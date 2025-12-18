@@ -29,7 +29,8 @@ var (
 	bundleRegisterName     = bundleRegister.Flag("name", "[REQUIRED] Name of bundle to be registered").Required().String()
 	bundleRegisterActivate = bundleRegister.Flag("with-activate", "[OPTIONAL] Associate (activate) this bundle with an idle AutoScalingGroup.").Bool()
 
-	bundleList = bundle.Command("list", "List registered application bundles.")
+	bundleList       = bundle.Command("list", "List registered application bundles.")
+	bundleListOutput = bundleList.Flag("output", "Output format (table, json). Default is table.").Default("table").Enum("table", "json")
 
 	bundleActivate       = bundle.Command("activate", "Activate one of the registered bundles. The active bundle will be used for the next deployment or scale-out.")
 	bundleActivateTarget = bundleActivate.Flag("target", "[REQUIRED] Target type for bundle. Valid values are either 'blue' or 'green'. The 'ec2 status' command allows you to check the target details.").Required().Enum("blue", "green")
@@ -40,7 +41,8 @@ var (
 
 	ec2 = app.Command("ec2", "")
 
-	ec2status = ec2.Command("status", "Show current deployment status.")
+	ec2status       = ec2.Command("status", "Show current deployment status.")
+	ec2statusOutput = ec2status.Flag("output", "Output format (table, json). Default is table.").Default("table").Enum("table", "json")
 
 	ec2deploy          = ec2.Command("deploy", "Deploy a new application to an idling AutoScalingGroup.")
 	ec2deploySilent    = ec2deploy.Flag("silent", "[OPTIONAL] Skip confirmation before process.").Bool()
@@ -122,7 +124,7 @@ func main() {
 		}
 
 	case bundleList.FullCommand():
-		err = bundler.ListBundles(ctx)
+		err = bundler.ListBundles(ctx, *bundleListOutput)
 
 	case bundleActivate.FullCommand():
 		err = bundler.Activate(ctx, internal.TargetType(*bundleActivateTarget), *bundleActivateName)
@@ -131,10 +133,10 @@ func main() {
 		err = bundler.Download(ctx, internal.TargetType(*bundleDownloadTarget))
 
 	case ec2status.FullCommand():
-		err = deployer.ShowStatus(ctx)
+		err = deployer.ShowStatus(ctx, *ec2statusOutput)
 
 	case ec2deploy.FullCommand():
-		if err = deployer.ShowStatus(ctx); err != nil {
+		if err = deployer.ShowStatus(ctx, "table"); err != nil {
 			break
 		}
 		if *ec2deploySilent == false && internal.AskToContinue() == false {
@@ -146,7 +148,7 @@ func main() {
 		}
 
 	case ec2rollback.FullCommand():
-		if err = deployer.ShowStatus(ctx); err != nil {
+		if err = deployer.ShowStatus(ctx, "table"); err != nil {
 			break
 		}
 		if *ec2rollbackSilent == false && internal.AskToContinue() == false {
