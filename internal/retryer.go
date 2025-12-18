@@ -1,8 +1,9 @@
 package internal
 
 import (
-	"github.com/pkg/errors"
 	"time"
+
+	"github.com/pkg/errors"
 )
 
 var RetryTimeout = errors.New("RetryTimeout")
@@ -37,6 +38,7 @@ func (r FixedIntervalRetryer) Start(hendler func(index int, interval *time.Durat
 			return errors.Wrapf(err, "RetryFailure")
 		}
 
+		//lint:ignore S1002 To make it easier to understand
 		if result == FinishRetry {
 			return nil
 		}

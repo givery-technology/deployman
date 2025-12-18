@@ -2,14 +2,15 @@ package test
 
 import (
 	"context"
+	"os"
+	"testing"
+	"time"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	asgTypes "github.com/aws/aws-sdk-go-v2/service/autoscaling/types"
 	albTypes "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
 	"github.com/givery-technology/deployman/internal"
 	"github.com/givery-technology/deployman/test/assert"
-	"os"
-	"testing"
-	"time"
 )
 
 const testdata = "./data"

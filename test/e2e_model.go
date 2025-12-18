@@ -1,12 +1,13 @@
 package test
 
 import (
+	"strconv"
+	"time"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	asgTypes "github.com/aws/aws-sdk-go-v2/service/autoscaling/types"
 	albTypes "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
 	"github.com/givery-technology/deployman/internal"
-	"strconv"
-	"time"
 )
 
 type TestingState struct {
