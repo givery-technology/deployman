@@ -58,7 +58,7 @@ func TestE2E(t *testing.T) {
 
 		assert.Success(t, bundler.Activate(ctx, internal.BlueTargetType, bundleName))
 		assert.Success(t, bundler.Activate(ctx, internal.GreenTargetType, bundleName))
-		assert.Success(t, bundler.ListBundles(ctx))
+		assert.Success(t, bundler.ListBundles(ctx, "table"))
 
 		t.Cleanup(func() {
 			_ = os.Remove(bundleName) // Measures to clean up downloaded files later

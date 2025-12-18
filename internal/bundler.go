@@ -3,6 +3,7 @@ package internal
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -28,9 +29,47 @@ type Bundler struct {
 	logger Logger
 }
 
-type BundleInfo struct {
+type ActiveBundle struct {
 	Value        string
 	LastModified *time.Time
+}
+
+type BundleListItem struct {
+	Number      int    `json:"number"`
+	LastUpdated string `json:"lastUpdated"`
+	BundleName  string `json:"bundleName"`
+	Status      string `json:"status"`
+}
+
+type BundleListOutput struct {
+	BucketName string           `json:"bucket"`
+	Bundles    []BundleListItem `json:"bundles"`
+}
+
+func (b *BundleListOutput) AsJSON() error {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(b)
+}
+
+func (b *BundleListOutput) AsTable() error {
+	var data [][]string
+	for _, item := range b.Bundles {
+		data = append(data, []string{
+			strconv.Itoa(item.Number),
+			item.LastUpdated,
+			item.BundleName,
+			item.Status,
+		})
+	}
+
+	fmt.Printf("Bucket: %s\n", b.BucketName)
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{"#", "last updated", "bundle name", "status"})
+	table.AppendBulk(data)
+	table.Render()
+
+	return nil
 }
 
 func NewBundler(deployConfig *Config, awsClient AwsClient, logger Logger) *Bundler {
@@ -55,25 +94,26 @@ func (b *Bundler) listBundles(ctx context.Context, bucket string) ([]s3Types.Obj
 	return objects, nil
 }
 
-func (b *Bundler) ListBundles(ctx context.Context) error {
-	hasError := func(err error) bool {
-		if err == nil {
-			return false
+func (b *Bundler) ListBundles(ctx context.Context, outputFormat string) error {
+	getActiveBundleOrNil := func(targetType TargetType) (*ActiveBundle, error) {
+		bundle, err := b.getActiveBundle(ctx, targetType)
+		if err != nil {
+			var apiErr smithy.APIError
+			if errors.As(err, &apiErr) && apiErr.ErrorCode() == "NoSuchKey" {
+				return nil, nil
+			}
+			return nil, err
 		}
-		var apiErr smithy.APIError
-		if errors.As(err, &apiErr) && apiErr.ErrorCode() == "NoSuchKey" {
-			return false
-		}
-		return true
+		return bundle, nil
 	}
 
-	blueBundle, err := b.getActiveBundle(ctx, BlueTargetType)
-	if hasError(err) {
+	blueBundle, err := getActiveBundleOrNil(BlueTargetType)
+	if err != nil {
 		return err
 	}
 
-	greenBundle, err := b.getActiveBundle(ctx, GreenTargetType)
-	if hasError(err) {
+	greenBundle, err := getActiveBundleOrNil(GreenTargetType)
+	if err != nil {
 		return err
 	}
 
@@ -82,7 +122,7 @@ func (b *Bundler) ListBundles(ctx context.Context) error {
 		return err
 	}
 
-	var data [][]string
+	var bundles []BundleListItem
 	for i, bundleObject := range bundleObjects {
 		var targets []string
 		if blueBundle != nil && strings.Contains(*bundleObject.Key, blueBundle.Value) {
@@ -96,21 +136,26 @@ func (b *Bundler) ListBundles(ctx context.Context) error {
 			status = "active:[" + strings.Join(targets, ", ") + "]"
 		}
 		location := b.config.TimeZone.CurrentLocation()
-		data = append(data, []string{
-			strconv.Itoa(i + 1),
-			bundleObject.LastModified.In(location).Format(time.RFC3339),
-			strings.Replace(*bundleObject.Key, BundlePrefix, "", 1),
-			status,
+		lastUpdated := bundleObject.LastModified.In(location).Format(time.RFC3339)
+		bundleName := strings.Replace(*bundleObject.Key, BundlePrefix, "", 1)
+
+		bundles = append(bundles, BundleListItem{
+			Number:      i + 1,
+			LastUpdated: lastUpdated,
+			BundleName:  bundleName,
+			Status:      status,
 		})
 	}
 
-	fmt.Printf("Bucket: %s\n", b.config.BundleBucket)
-	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"#", "last updated", "bundle name", "status"})
-	table.AppendBulk(data)
-	table.Render()
+	output := &BundleListOutput{
+		BucketName: b.config.BundleBucket,
+		Bundles:    bundles,
+	}
 
-	return nil
+	if outputFormat == "json" {
+		return output.AsJSON()
+	}
+	return output.AsTable()
 }
 
 func (b *Bundler) Register(ctx context.Context, uploadFile string, bundleName string) error {
@@ -173,7 +218,7 @@ func (b *Bundler) Register(ctx context.Context, uploadFile string, bundleName st
 	return nil
 }
 
-func (b *Bundler) getActiveBundle(ctx context.Context, targetType TargetType) (*BundleInfo, error) {
+func (b *Bundler) getActiveBundle(ctx context.Context, targetType TargetType) (*ActiveBundle, error) {
 	output, err := b.client.GetS3BucketObject(ctx, b.config.BundleBucket, ActiveBundleKeyPrefix+string(targetType))
 	if err != nil {
 		return nil, err
@@ -185,7 +230,7 @@ func (b *Bundler) getActiveBundle(ctx context.Context, targetType TargetType) (*
 		return nil, errors.WithStack(err)
 	}
 
-	return &BundleInfo{
+	return &ActiveBundle{
 		Value:        buf.String(),
 		LastModified: output.LastModified,
 	}, nil

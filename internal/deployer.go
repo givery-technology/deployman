@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -49,6 +50,83 @@ type HealthInfo struct {
 	UnusedCount    int
 	InitialCount   int
 	DrainingCount  int
+}
+
+type ASGStatus struct {
+	Name            string `json:"name"`
+	DesiredCapacity int32  `json:"desiredCapacity"`
+	MinSize         int32  `json:"minSize"`
+	MaxSize         int32  `json:"maxSize"`
+	LifecycleState  string `json:"lifecycleState"`
+}
+
+type ELBStatus struct {
+	TargetGroupName string `json:"targetGroupName"`
+	Total           int    `json:"total"`
+	Healthy         int    `json:"healthy"`
+	Unhealthy       int    `json:"unhealthy"`
+	Unused          int    `json:"unused"`
+	Initial         int    `json:"initial"`
+	Draining        int    `json:"draining"`
+}
+
+type TargetStatus struct {
+	TargetType       string    `json:"target"`
+	TrafficWeight    int32     `json:"trafficWeight"`
+	AutoScalingGroup ASGStatus `json:"autoScalingGroup"`
+	LoadBalancer     ELBStatus `json:"loadBalancer"`
+}
+
+type StatusOutput struct {
+	Targets []TargetStatus `json:"targets"`
+}
+
+func (s *StatusOutput) AsJSON() error {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(s)
+}
+
+func (s *StatusOutput) AsTable() error {
+	var data [][]string
+	for _, target := range s.Targets {
+		data = append(data, []string{
+			target.TargetType,
+			strconv.Itoa(int(target.TrafficWeight)),
+			target.AutoScalingGroup.Name,
+			strconv.Itoa(int(target.AutoScalingGroup.DesiredCapacity)),
+			strconv.Itoa(int(target.AutoScalingGroup.MinSize)),
+			strconv.Itoa(int(target.AutoScalingGroup.MaxSize)),
+			target.AutoScalingGroup.LifecycleState,
+			target.LoadBalancer.TargetGroupName,
+			strconv.Itoa(target.LoadBalancer.Total),
+			strconv.Itoa(target.LoadBalancer.Healthy),
+			strconv.Itoa(target.LoadBalancer.Unhealthy),
+			strconv.Itoa(target.LoadBalancer.Unused),
+			strconv.Itoa(target.LoadBalancer.Initial),
+			strconv.Itoa(target.LoadBalancer.Draining),
+		})
+	}
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{
+		"target",
+		"traffic(%)",
+		"asg:name",
+		"asg:desired",
+		"asg:min",
+		"asg:max",
+		"asg:lifecycle",
+		"elb:tgname",
+		"elb:total",
+		"elb:healthy",
+		"elb:unhealthy",
+		"elb:unused",
+		"elb:initial",
+		"elb:draining",
+	})
+	table.AppendBulk(data)
+	table.Render()
+	return nil
 }
 
 func NewDeployer(deployConfig *Config, awsClient AwsClient, logger Logger) *Deployer {
@@ -171,7 +249,7 @@ func (d *Deployer) GetDeployInfo(ctx context.Context) (*DeployInfo, error) {
 	}
 }
 
-func (d *Deployer) ShowStatus(ctx context.Context) error {
+func (d *Deployer) ShowStatus(ctx context.Context, outputFormat string) error {
 	//DeployTarget
 	rule, err := d.client.GetALBListenerRule(ctx, d.config.ListenerRuleArn)
 	if err != nil {
@@ -213,47 +291,40 @@ func (d *Deployer) ShowStatus(ctx context.Context) error {
 		return err
 	}
 
-	toData := func(target *DeployTarget, targetGroupName string, health *HealthInfo) []string {
-		return []string{
-			string(target.Type),
-			strconv.Itoa(int(*target.TargetGroup.Weight)),
-			*target.AutoScalingGroup.AutoScalingGroupName,
-			strconv.Itoa(int(*target.AutoScalingGroup.DesiredCapacity)),
-			strconv.Itoa(int(*target.AutoScalingGroup.MinSize)),
-			strconv.Itoa(int(*target.AutoScalingGroup.MaxSize)),
-			d.lifecycleStateToString(target.AutoScalingGroup),
-			targetGroupName,
-			strconv.Itoa(health.TotalCount),
-			strconv.Itoa(health.HealthyCount),
-			strconv.Itoa(health.UnhealthyCount),
-			strconv.Itoa(health.UnusedCount),
-			strconv.Itoa(health.InitialCount),
-			strconv.Itoa(health.DrainingCount),
+	toStatus := func(target *DeployTarget, targetGroupName string, health *HealthInfo) TargetStatus {
+		return TargetStatus{
+			TargetType:    string(target.Type),
+			TrafficWeight: *target.TargetGroup.Weight,
+			AutoScalingGroup: ASGStatus{
+				Name:            *target.AutoScalingGroup.AutoScalingGroupName,
+				DesiredCapacity: *target.AutoScalingGroup.DesiredCapacity,
+				MinSize:         *target.AutoScalingGroup.MinSize,
+				MaxSize:         *target.AutoScalingGroup.MaxSize,
+				LifecycleState:  d.lifecycleStateToString(target.AutoScalingGroup),
+			},
+			LoadBalancer: ELBStatus{
+				TargetGroupName: targetGroupName,
+				Total:           health.TotalCount,
+				Healthy:         health.HealthyCount,
+				Unhealthy:       health.UnhealthyCount,
+				Unused:          health.UnusedCount,
+				Initial:         health.InitialCount,
+				Draining:        health.DrainingCount,
+			},
 		}
 	}
 
-	data := [][]string{toData(blueTarget, blueTGName, blueHealth), toData(greenTarget, greenTGName, greenHealth)}
-	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{
-		"target",
-		"traffic(%)",
-		"asg:name",
-		"asg:desired",
-		"asg:min",
-		"asg:max",
-		"asg:lifecycle",
-		"elb:tgname",
-		"elb:total",
-		"elb:healthy",
-		"elb:unhealthy",
-		"elb:unused",
-		"elb:initial",
-		"elb:draining",
-	})
-	table.AppendBulk(data)
-	table.Render()
+	output := &StatusOutput{
+		Targets: []TargetStatus{
+			toStatus(blueTarget, blueTGName, blueHealth),
+			toStatus(greenTarget, greenTGName, greenHealth),
+		},
+	}
 
-	return nil
+	if outputFormat == "json" {
+		return output.AsJSON()
+	}
+	return output.AsTable()
 }
 
 func (d *Deployer) Deploy(
@@ -307,7 +378,7 @@ func (d *Deployer) Deploy(
 	}
 
 	d.logger.Info("Health check completed.")
-	if err := d.ShowStatus(ctx); err != nil {
+	if err := d.ShowStatus(ctx, "table"); err != nil {
 		return err
 	}
 
@@ -318,7 +389,7 @@ func (d *Deployer) Deploy(
 		}
 
 		d.logger.Info("Traffic swap completed.")
-		if err := d.ShowStatus(ctx); err != nil {
+		if err := d.ShowStatus(ctx, "table"); err != nil {
 			return err
 		}
 	}
@@ -340,7 +411,7 @@ func (d *Deployer) Deploy(
 		if err != nil {
 			return err
 		}
-		if err = d.ShowStatus(ctx); err != nil {
+		if err = d.ShowStatus(ctx, "table"); err != nil {
 			return err
 		}
 	}
