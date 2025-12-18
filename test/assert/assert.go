@@ -16,6 +16,7 @@ func callerToString() string {
 }
 
 func True(t *testing.T, source bool) {
+	//lint:ignore S1002 To make it easier to understand
 	if source == true {
 		return
 	}
@@ -23,6 +24,7 @@ func True(t *testing.T, source bool) {
 }
 
 func False(t *testing.T, source bool) {
+	//lint:ignore S1002 To make it easier to understand
 	if source == false {
 		return
 	}
