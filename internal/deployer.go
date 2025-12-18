@@ -69,7 +69,7 @@ func newASGStatus(autoScalingGroup *asgTypes.AutoScalingGroup) *ASGStatus {
 	var states []ASGLifeCycleStatus
 	for state, count := range lifecycleStates {
 		states = append(states, ASGLifeCycleStatus{
-			Name:  string(state),
+			State: string(state),
 			Count: count,
 		})
 	}
@@ -91,12 +91,12 @@ func (a *ASGStatus) StringLifecycles() string {
 }
 
 type ASGLifeCycleStatus struct {
-	Name  string `json:"name"`
+	State string `json:"state"`
 	Count int    `json:"count"`
 }
 
 func (a *ASGLifeCycleStatus) String() string {
-	return fmt.Sprintf("%s:%d", a.Name, a.Count)
+	return fmt.Sprintf("%s:%d", a.State, a.Count)
 }
 
 type ELBStatus struct {
@@ -117,18 +117,18 @@ type TargetStatus struct {
 }
 
 type StatusOutput struct {
-	Targets []TargetStatus `json:"targets"`
+	targets []TargetStatus
 }
 
 func (s *StatusOutput) AsJSON(w io.Writer) error {
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
-	return encoder.Encode(s)
+	return encoder.Encode(s.targets)
 }
 
 func (s *StatusOutput) AsTable(w io.Writer) error {
 	var data [][]string
-	for _, target := range s.Targets {
+	for _, target := range s.targets {
 		data = append(data, []string{
 			target.TargetType,
 			strconv.Itoa(int(target.TrafficWeight)),
@@ -332,7 +332,7 @@ func (d *Deployer) ShowStatus(ctx context.Context, outputFormat string) error {
 	}
 
 	output := &StatusOutput{
-		Targets: []TargetStatus{
+		targets: []TargetStatus{
 			toStatus(blueTarget, blueTGName, blueHealth),
 			toStatus(greenTarget, greenTGName, greenHealth),
 		},
