@@ -3,15 +3,16 @@ package internal
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	asgTypes "github.com/aws/aws-sdk-go-v2/service/autoscaling/types"
 	albTypes "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
-	"os"
-	"strconv"
-	"strings"
-	"time"
 )
 
 const (
@@ -236,7 +237,7 @@ func (d *Deployer) ShowStatus(ctx context.Context) error {
 
 	data := [][]string{toData(blueTarget, blueTGName, blueHealth), toData(greenTarget, greenTGName, greenHealth)}
 	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{
+	table.Header(
 		"target",
 		"traffic(%)",
 		"asg:name",
@@ -250,8 +251,8 @@ func (d *Deployer) ShowStatus(ctx context.Context) error {
 		"elb:unhealthy",
 		"elb:unused",
 		"elb:initial",
-		"elb:draining"})
-	table.AppendBulk(data)
+		"elb:draining")
+	table.Bulk(data)
 	table.Render()
 
 	return nil

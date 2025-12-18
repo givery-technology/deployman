@@ -4,15 +4,16 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	s3Types "github.com/aws/aws-sdk-go-v2/service/s3/types"
-	"github.com/aws/smithy-go"
-	"github.com/olekukonko/tablewriter"
-	"github.com/pkg/errors"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	s3Types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
+	"github.com/olekukonko/tablewriter"
+	"github.com/pkg/errors"
 )
 
 const (
@@ -105,8 +106,8 @@ func (b *Bundler) ListBundles(ctx context.Context) error {
 
 	fmt.Printf("Bucket: %s\n", b.config.BundleBucket)
 	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"#", "last updated", "bundle name", "status"})
-	table.AppendBulk(data)
+	table.Header("#", "last updated", "bundle name", "status")
+	table.Bulk(data)
 	table.Render()
 
 	return nil
