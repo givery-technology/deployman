@@ -2,6 +2,9 @@ package internal
 
 import (
 	"context"
+	"os"
+	"strings"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsConfig "github.com/aws/aws-sdk-go-v2/config"
 	asg "github.com/aws/aws-sdk-go-v2/service/autoscaling"
@@ -13,8 +16,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	ssmTypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
 	"github.com/pkg/errors"
-	"os"
-	"strings"
 )
 
 type AwsClient interface {
@@ -137,10 +138,10 @@ func (c *DefaultAwsClient) DisableS3BucketPublicAccess(ctx context.Context, buck
 	_, err := c.s3.PutPublicAccessBlock(ctx, &s3.PutPublicAccessBlockInput{
 		Bucket: &bucket,
 		PublicAccessBlockConfiguration: &s3Types.PublicAccessBlockConfiguration{
-			BlockPublicAcls:       true,
-			BlockPublicPolicy:     true,
-			IgnorePublicAcls:      true,
-			RestrictPublicBuckets: true,
+			BlockPublicAcls:       aws.Bool(true),
+			BlockPublicPolicy:     aws.Bool(true),
+			IgnorePublicAcls:      aws.Bool(true),
+			RestrictPublicBuckets: aws.Bool(true),
 		},
 	})
 	if err != nil {

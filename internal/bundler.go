@@ -4,15 +4,16 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	s3Types "github.com/aws/aws-sdk-go-v2/service/s3/types"
-	"github.com/aws/smithy-go"
-	"github.com/olekukonko/tablewriter"
-	"github.com/pkg/errors"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	s3Types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
+	"github.com/olekukonko/tablewriter"
+	"github.com/pkg/errors"
 )
 
 const (

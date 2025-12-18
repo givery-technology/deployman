@@ -3,11 +3,12 @@ package internal
 import (
 	"context"
 	"encoding/json"
-	"github.com/go-playground/validator/v10"
-	"github.com/pkg/errors"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/go-playground/validator/v10"
+	"github.com/pkg/errors"
 )
 
 type Config struct {
@@ -62,7 +63,7 @@ func NewConfig(ctx context.Context, awsClient AwsClient, filepath string) (*Conf
 
 	var raw []byte
 	if strings.HasPrefix(filepath, "ssm:") {
-		ssmParameterName := strings.TrimLeft(filepath, "ssm:")
+		ssmParameterName := strings.TrimPrefix(filepath, "ssm:")
 		parameter, err := awsClient.GetSSMParameter(ctx, ssmParameterName, false)
 		if err != nil {
 			return nil, errors.WithStack(err)

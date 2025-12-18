@@ -3,13 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/alecthomas/kingpin"
-	"github.com/givery-technology/deployman/internal"
-	"github.com/pkg/errors"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/alecthomas/kingpin"
+	"github.com/givery-technology/deployman/internal"
+	"github.com/pkg/errors"
 )
 
 var Version = "unset"

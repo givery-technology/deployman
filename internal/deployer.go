@@ -3,15 +3,16 @@ package internal
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	asgTypes "github.com/aws/aws-sdk-go-v2/service/autoscaling/types"
 	albTypes "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
-	"os"
-	"strconv"
-	"strings"
-	"time"
 )
 
 const (
@@ -84,11 +85,7 @@ func (d *Deployer) getHealthInfo(ctx context.Context, targetGroupArn string) (*H
 func (d *Deployer) lifecycleStateToString(autoScalingGroup *asgTypes.AutoScalingGroup) string {
 	lifecycleStates := map[asgTypes.LifecycleState]int{}
 	for _, ins := range autoScalingGroup.Instances {
-		if _, ok := lifecycleStates[ins.LifecycleState]; ok {
-			lifecycleStates[ins.LifecycleState]++
-		} else {
-			lifecycleStates[ins.LifecycleState] = 1
-		}
+		lifecycleStates[ins.LifecycleState]++
 	}
 	var states []string
 	for state, count := range lifecycleStates {
@@ -105,11 +102,12 @@ func (d *Deployer) GetDeployTarget(
 	ctx context.Context, rule *albTypes.Rule, targetType TargetType) (*DeployTarget, error) {
 
 	var target *Target
-	if targetType == BlueTargetType {
+	switch targetType {
+	case BlueTargetType:
 		target = d.config.Target.Blue
-	} else if targetType == GreenTargetType {
+	case GreenTargetType:
 		target = d.config.Target.Green
-	} else {
+	default:
 		return nil, errors.Errorf("TargetType:'%s' does not exist.", string(targetType))
 	}
 
@@ -250,7 +248,8 @@ func (d *Deployer) ShowStatus(ctx context.Context) error {
 		"elb:unhealthy",
 		"elb:unused",
 		"elb:initial",
-		"elb:draining"})
+		"elb:draining",
+	})
 	table.AppendBulk(data)
 	table.Render()
 

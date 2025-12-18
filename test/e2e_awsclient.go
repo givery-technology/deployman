@@ -3,6 +3,12 @@ package test
 import (
 	"bytes"
 	"context"
+	"io"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	asgTypes "github.com/aws/aws-sdk-go-v2/service/autoscaling/types"
 	albTypes "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
@@ -11,11 +17,6 @@ import (
 	ssmTypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
 	"github.com/givery-technology/deployman/internal"
 	"github.com/pkg/errors"
-	"io"
-	"os"
-	"strconv"
-	"strings"
-	"time"
 )
 
 type MockAwsClient struct {
@@ -169,7 +170,7 @@ func (c *MockAwsClient) GetALBListenerRule(_ context.Context, listenerRuleArn st
 				},
 			},
 		},
-		IsDefault: true,
+		IsDefault: aws.Bool(true),
 		RuleArn:   c.State.LoadBalancer.ListenerRuleArn,
 	}, nil
 }
